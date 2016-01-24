@@ -117,7 +117,50 @@ static void tick_physics(struct GameState *game_state, float dt)
     }
 }
 
-void tick_game(struct GameMemory *memory, struct Input *input, float dt)
+static struct AABB calc_mouse_selection_box(struct Input *input, uint32 mouse_button)
+{
+    vec2 origin = input->mouse_down_positions[mouse_button];
+    vec2 end = input->mouse_position;
+
+    struct AABB aabb = {0};
+    aabb.min = min_vec2(origin, end);
+    aabb.max = max_vec2(origin, end);
+    return aabb;
+}
+
+static struct AABB aabb_from_transform(vec2 center, vec2 size)
+{
+    vec2 half_size = vec2_div(size, 2.0f);
+
+    struct AABB aabb;
+    aabb.min = vec2_sub(center, half_size);
+    aabb.max = vec2_add(center, half_size);
+    return aabb;
+}
+
+static bool aabb_intersection(struct AABB a, struct AABB b)
+{
+    if ((a.max.x > b.min.x) && (a.min.x < b.max.x))
+    {
+        if ((a.max.y > b.min.y) && (a.min.y < b.max.y))
+            return true;
+    }
+
+    return false;
+}
+
+static vec2 screen_to_world_coords(vec2 screen_coords, struct Camera *camera, uint32 screen_width, uint32 screen_height)
+{
+    float aspect_ratio = (float)screen_width / (float)screen_height;
+
+    vec2 world_coords;
+    world_coords.x = ((screen_coords.x / (float)screen_width) * 2.0f - 1.0f) * camera->zoom/2.0f;
+    world_coords.y = ((screen_coords.y / (float)screen_height) * 2.0f - 1.0f) * camera->zoom/2.0f / aspect_ratio;
+    world_coords = vec2_add(world_coords, camera->position);
+    return world_coords;
+}
+
+void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_width, uint32 screen_height, float dt)
 {
     struct GameState *game_state = (struct GameState *)memory->game_memory;
     struct RenderBuffer *render_buffer = (struct RenderBuffer *)memory->render_memory;
@@ -127,18 +170,13 @@ void tick_game(struct GameMemory *memory, struct Input *input, float dt)
 
     if (mouse_down(MOUSE_LEFT, input))
     {
-        vec2 origin = input->mouse_down_positions[MOUSE_LEFT];
-        vec2 end = input->mouse_position;
+        struct AABB box = calc_mouse_selection_box(input, MOUSE_LEFT);
 
-        vec2 min = min_vec2(origin, end);
-        vec2 max = max_vec2(origin, end);
-
-        vec2 bottom_left  = vec2_new(min.x, max.y);
-        vec2 bottom_right = vec2_new(max.x, max.y);
-        vec2 top_left     = vec2_new(min.x, min.y);
-        vec2 top_right    = vec2_new(max.x, min.y);
-
-        vec2 size = vec2_sub(max, min);
+        vec2 size = vec2_sub(box.max, box.min);
+        vec2 bottom_left  = vec2_new(box.min.x, box.max.y);
+        vec2 bottom_right = vec2_new(box.max.x, box.max.y);
+        vec2 top_left     = vec2_new(box.min.x, box.min.y);
+        vec2 top_right    = vec2_new(box.max.x, box.min.y);
 
         const uint32 outline_thickness = 1;
 
@@ -148,16 +186,33 @@ void tick_game(struct GameMemory *memory, struct Input *input, float dt)
         draw_screen_quad_buffered(&render_buffer->screen_quads, top_right, vec2_new(outline_thickness, size.y), vec4_zero(), vec3_new(1, 1, 0));
     }
 
+    if (mouse_released(MOUSE_LEFT, input))
+    {
+        struct AABB selection_box = calc_mouse_selection_box(input, MOUSE_LEFT);
+
+        selection_box.min = screen_to_world_coords(selection_box.min, &game_state->camera, screen_width, screen_height);
+        selection_box.max = screen_to_world_coords(selection_box.max, &game_state->camera, screen_width, screen_height);
+
+        for (uint32 i = 0; i < game_state->ship_count; ++i)
+        {
+            struct Ship *ship = &game_state->ships[i];
+            struct AABB ship_aabb = aabb_from_transform(ship->position, ship->size);
+
+            if (aabb_intersection(selection_box, ship_aabb))
+                ship->size = vec2_mul(ship->size, 2.0f);
+        }
+    }
+
     tick_camera(input, &game_state->camera, dt);
     tick_physics(game_state, dt);
 }
 
-void render_game(struct GameMemory *memory, struct Renderer *renderer, uint32 viewport_width, uint32 viewport_height)
+void render_game(struct GameMemory *memory, struct Renderer *renderer, uint32 screen_width, uint32 screen_height)
 {
     struct GameState *game_state = (struct GameState *)memory->game_memory;
     struct RenderBuffer *render_buffer = (struct RenderBuffer *)memory->render_memory;
 
-    float aspect_ratio = (float)viewport_width / (float)viewport_height;
+    float aspect_ratio = (float)screen_width / (float)screen_height;
     mat4 projection_matrix = mat4_orthographic(-game_state->camera.zoom/2.0f, game_state->camera.zoom/2.0f,
                                                -game_state->camera.zoom/2.0f / aspect_ratio, game_state->camera.zoom/2.0f / aspect_ratio,
                                                0.0f, 1.0f);
@@ -182,7 +237,7 @@ void render_game(struct GameMemory *memory, struct Renderer *renderer, uint32 vi
     draw_quad_buffer(&renderer->sprite_batch, &render_buffer->quads);
     bind_program(0);
 
-    view_projection_matrix = mat4_orthographic(0, viewport_width, viewport_height, 0, 0, 1);
+    view_projection_matrix = mat4_orthographic(0, screen_width, screen_height, 0, 0, 1);
     update_ubo(renderer->camera_ubo, sizeof(mat4), &view_projection_matrix);
 
     bind_program(renderer->quad_program);

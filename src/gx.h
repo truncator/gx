@@ -35,6 +35,12 @@ struct Ship
     float rotation_velocity;
 };
 
+struct AABB
+{
+    vec2 min;
+    vec2 max;
+};
+
 struct GameState
 {
     struct Camera camera;
@@ -44,5 +50,5 @@ struct GameState
 };
 
 void init_game(struct GameMemory *memory);
-void tick_game(struct GameMemory *memory, struct Input *input, float dt);
-void render_game(struct GameMemory *memory, struct Renderer *renderer, uint32 viewport_width, uint32 viewport_height);
+void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_width, uint32 screen_height, float dt);
+void render_game(struct GameMemory *memory, struct Renderer *renderer, uint32 screen_width, uint32 screen_height);

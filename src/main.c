@@ -138,7 +138,7 @@ int main(int argc, char *argv[])
         {
             process_input(window.glfw, &input);
 
-            tick_game(&game_memory, &input, tick_dt);
+            tick_game(&game_memory, &input, window.width, window.height, tick_dt);
             clear_input(&input);
 
             tick_accumulator -= tick_dt;
