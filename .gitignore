@@ -1,0 +1,9 @@
+# gitignore
+
+bin/*
+build
+
+*.py
+*.pyc
+
+run.sh
