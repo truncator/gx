@@ -16,16 +16,6 @@ struct File
 struct File load_file(const char *path);
 void free_file(struct File *file);
 
-enum MouseButton
-{
-    MOUSE_LEFT,
-    MOUSE_RIGHT,
-    MOUSE_MIDDLE,
-
-    MOUSE_FORWARD,
-    MOUSE_BACK,
-};
-
 struct Input
 {
     //
@@ -60,6 +50,16 @@ void wrap_cursor(struct GLFWwindow *window, struct Input *input, uint32 width, u
 
 void process_input(struct GLFWwindow *window, struct Input *input);
 void clear_input(struct Input *input);
+
+enum MouseButton
+{
+    MOUSE_LEFT,
+    MOUSE_RIGHT,
+    MOUSE_MIDDLE,
+
+    MOUSE_FORWARD,
+    MOUSE_BACK,
+};
 
 enum KeyCode
 {

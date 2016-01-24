@@ -10,6 +10,9 @@ struct GameMemory
 {
     void *game_memory;
     size_t game_memory_size;
+
+    void *render_memory;
+    size_t render_memory_size;
 };
 
 struct Camera
@@ -25,14 +28,19 @@ struct Camera
 struct Ship
 {
     vec2 position;
+    float rotation;
     vec2 size;
 
-    float rotation;
+    vec2 move_velocity;
+    float rotation_velocity;
 };
 
 struct GameState
 {
     struct Camera camera;
+
+    struct Ship ships[8];
+    uint32 ship_count;
 };
 
 void init_game(struct GameMemory *memory);

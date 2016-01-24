@@ -64,8 +64,8 @@ struct LineBuffer
 
 struct Quad
 {
-    vec3 position;
-    vec3 size;
+    vec2 position;
+    vec2 size;
     vec4 uv;
     vec3 color;
 };
@@ -79,6 +79,12 @@ struct QuadBuffer
 enum UniformBuffer
 {
     UBO_CAMERA,
+};
+
+struct RenderBuffer
+{
+    struct QuadBuffer quads;
+    struct QuadBuffer screen_quads;
 };
 
 struct Renderer
@@ -130,9 +136,8 @@ void draw_line_buffer(struct LineBuffer *buffer, uint32 program);
 void clear_line_buffer(struct LineBuffer *buffer);
 #endif
 
-#if 0
-void draw_quad(struct QuadBuffer *buffer, vec3 position, vec3 size, vec4 uv, vec3 color);
-void draw_screen_quad(struct QuadBuffer *buffer, vec2 position, vec2 size, vec4 uv, vec3 color);
+void draw_quad_buffered(struct QuadBuffer *buffer, vec2 position, vec2 size, vec4 uv, vec3 color);
+void draw_screen_quad_buffered(struct QuadBuffer *buffer, vec2 position, vec2 size, vec4 uv, vec3 color);
 void draw_quad_buffer(struct SpriteBatch *sprite_batch, struct QuadBuffer *buffer);
+void draw_screen_quad_buffer(struct SpriteBatch *sprite_batch, struct QuadBuffer *buffer);
 void clear_quad_buffer(struct QuadBuffer *buffer);
-#endif

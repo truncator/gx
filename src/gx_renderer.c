@@ -285,28 +285,8 @@ void flush_sprite_batch(struct SpriteBatch *batch)
     batch->current_size = 0;
 }
 
-void draw_quad(struct SpriteBatch *batch, vec2 position, vec2 size, vec3 color)
+static void add_quad_to_sprite_batch(struct SpriteBatch *batch, vec3 bottom_left, vec3 bottom_right, vec3 top_right, vec3 top_left, vec3 color)
 {
-    ASSERT(batch->drawing);
-
-    mat4 matrix = mat4_identity();
-    matrix = mat4_translate(matrix, vec3_new(position.x, position.y, 0.0f));
-    matrix = mat4_scale(matrix, vec3_new(size.x, size.y, 1.0f));
-
-#if 0
-    // Screen space.
-    vec3 bottom_left  = mat4_mul_vec3(matrix, vec3_new(0.0f, 1.0f, 0.0f));
-    vec3 bottom_right = mat4_mul_vec3(matrix, vec3_new(1.0f, 1.0f, 0.0f));
-    vec3 top_right    = mat4_mul_vec3(matrix, vec3_new(1.0f, 0.0f, 0.0f));
-    vec3 top_left     = mat4_mul_vec3(matrix, vec3_new(0.0f, 0.0f, 0.0f));
-#else
-    // World space.
-    vec3 bottom_left  = mat4_mul_vec3(matrix, vec3_new(-0.5f, -0.5f, 0.0f));
-    vec3 bottom_right = mat4_mul_vec3(matrix, vec3_new( 0.5f, -0.5f, 0.0f));
-    vec3 top_right    = mat4_mul_vec3(matrix, vec3_new( 0.5f,  0.5f, 0.0f));
-    vec3 top_left     = mat4_mul_vec3(matrix, vec3_new(-0.5f,  0.5f, 0.0f));
-#endif
-
     uint32 index = 4 * batch->current_size;
     if (index + 3 >= batch->max_size)
         flush_sprite_batch(batch);
@@ -332,6 +312,38 @@ void draw_quad(struct SpriteBatch *batch, vec2 position, vec2 size, vec3 color)
     v3->color = color;
 
     ++batch->current_size;
+}
+
+void draw_quad(struct SpriteBatch *batch, vec2 position, vec2 size, vec3 color)
+{
+    ASSERT(batch->drawing);
+
+    mat4 matrix = mat4_identity();
+    matrix = mat4_translate(matrix, vec3_new(position.x, position.y, 0.0f));
+    matrix = mat4_scale(matrix, vec3_new(size.x, size.y, 1.0f));
+
+    vec3 bottom_left  = mat4_mul_vec3(matrix, vec3_new(-0.5f, -0.5f, 0.0f));
+    vec3 bottom_right = mat4_mul_vec3(matrix, vec3_new( 0.5f, -0.5f, 0.0f));
+    vec3 top_right    = mat4_mul_vec3(matrix, vec3_new( 0.5f,  0.5f, 0.0f));
+    vec3 top_left     = mat4_mul_vec3(matrix, vec3_new(-0.5f,  0.5f, 0.0f));
+
+    add_quad_to_sprite_batch(batch, bottom_left, bottom_right, top_right, top_left, color);
+}
+
+static void draw_screen_quad(struct SpriteBatch *batch, vec2 position, vec2 size, vec3 color)
+{
+    ASSERT(batch->drawing);
+
+    mat4 matrix = mat4_identity();
+    matrix = mat4_translate(matrix, vec3_new(position.x, position.y, 0.0f));
+    matrix = mat4_scale(matrix, vec3_new(size.x, size.y, 1.0f));
+
+    vec3 bottom_left  = mat4_mul_vec3(matrix, vec3_new(0.0f, 1.0f, 0.0f));
+    vec3 bottom_right = mat4_mul_vec3(matrix, vec3_new(1.0f, 1.0f, 0.0f));
+    vec3 top_right    = mat4_mul_vec3(matrix, vec3_new(1.0f, 0.0f, 0.0f));
+    vec3 top_left     = mat4_mul_vec3(matrix, vec3_new(0.0f, 0.0f, 0.0f));
+
+    add_quad_to_sprite_batch(batch, bottom_left, bottom_right, top_right, top_left, color);
 }
 
 #if 0
@@ -424,8 +436,7 @@ void clear_line_buffer(struct LineBuffer *buffer)
 }
 #endif
 
-#if 0
-void draw_quad(struct QuadBuffer *buffer, vec3 position, vec3 size, vec4 uv, vec3 color)
+void draw_quad_buffered(struct QuadBuffer *buffer, vec2 position, vec2 size, vec4 uv, vec3 color)
 {
     ASSERT(buffer->current_size < ARRAY_SIZE(buffer->quads));
     struct Quad *quad = &buffer->quads[buffer->current_size++];
@@ -436,13 +447,13 @@ void draw_quad(struct QuadBuffer *buffer, vec3 position, vec3 size, vec4 uv, vec
     quad->color = color;
 }
 
-void draw_screen_quad(struct QuadBuffer *buffer, vec2 position, vec2 size, vec4 uv, vec3 color)
+void draw_screen_quad_buffered(struct QuadBuffer *buffer, vec2 position, vec2 size, vec4 uv, vec3 color)
 {
     ASSERT(buffer->current_size < ARRAY_SIZE(buffer->quads));
     struct Quad *quad = &buffer->quads[buffer->current_size++];
 
-    quad->position = vec3_new(position.x, position.y, 0.0f);
-    quad->size = vec3_new(size.x, size.y, 1.0f);
+    quad->position = vec2_new(position.x, position.y);
+    quad->size = vec2_new(size.x, size.y);
     quad->uv = uv;
     quad->color = color;
 }
@@ -452,7 +463,23 @@ void draw_quad_buffer(struct SpriteBatch *sprite_batch, struct QuadBuffer *buffe
     begin_sprite_batch(sprite_batch);
 
     for (uint32 i = 0; i < buffer->current_size; ++i)
-        add_quad_to_sprite_batch(sprite_batch, &buffer->quads[i]);
+    {
+        struct Quad *quad = &buffer->quads[i];
+        draw_quad(sprite_batch, quad->position, quad->size, quad->color);
+    }
+
+    end_sprite_batch(sprite_batch);
+}
+
+void draw_screen_quad_buffer(struct SpriteBatch *sprite_batch, struct QuadBuffer *buffer)
+{
+    begin_sprite_batch(sprite_batch);
+
+    for (uint32 i = 0; i < buffer->current_size; ++i)
+    {
+        struct Quad *quad = &buffer->quads[i];
+        draw_screen_quad(sprite_batch, quad->position, quad->size, quad->color);
+    }
 
     end_sprite_batch(sprite_batch);
 }
@@ -461,4 +488,3 @@ void clear_quad_buffer(struct QuadBuffer *buffer)
 {
     buffer->current_size = 0;
 }
-#endif
