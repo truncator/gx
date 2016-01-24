@@ -8,7 +8,7 @@ Dependencies
 ------------
 
 * [GLFW](https://github.com/glfw/glfw/)
-* [GL3W](https://github.com/skaslev/gl3://github.com/skaslev/gl3w)
+* [GL3W](https://github.com/skaslev/gl3w)
 * [stb](https://github.com/nothings/stb/)
 
 Building
