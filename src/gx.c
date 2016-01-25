@@ -2,6 +2,74 @@
 #include "gx_io.h"
 #include "gx_renderer.h"
 
+#define NULL_UINT_HASH_KEY UINT32_MAX
+
+static struct UIntHashMap create_uint_hash_map()
+{
+    struct UIntHashMap map = {0};
+
+    uint32 size = ARRAY_SIZE(map.buckets);
+    for (uint32 i = 0; i < size; ++i)
+    {
+        struct UIntHashPair *pair = &map.buckets[i];
+        pair->key = NULL_UINT_HASH_KEY;
+    }
+
+    return map;
+}
+
+static struct UIntHashPair *find_pair(struct UIntHashMap *map, uint32 key)
+{
+    uint32 hash_map_size = ARRAY_SIZE(map->buckets);
+
+    // TODO: actually hash this?
+    uint32 hash = key;
+    uint32 bucket = hash % hash_map_size;
+
+    struct UIntHashPair *pair = &map->buckets[bucket];
+    if (pair->key == NULL_UINT_HASH_KEY)
+        return NULL;
+
+    while (pair->key != key)
+    {
+        bucket = (bucket + 1) % hash_map_size;
+        pair = &map->buckets[bucket];
+
+        if (pair->key == NULL_UINT_HASH_KEY)
+            return NULL;
+    }
+
+    return pair;
+}
+
+static void emplace(struct UIntHashMap *map, uint32 key, uint32 value)
+{
+    struct UIntHashPair *pair = find_pair(map, key);
+    ASSERT(pair == NULL);
+
+    uint32 hash_map_size = ARRAY_SIZE(map->buckets);
+
+    uint32 hash = key;
+    uint32 bucket = hash % hash_map_size;
+
+    pair = &map->buckets[bucket];
+    while ((pair->key != NULL_UINT_HASH_KEY) && (pair->key != key))
+    {
+        bucket = (bucket + 1) % hash_map_size;
+        pair = &map->buckets[bucket];
+
+        if (pair->key == NULL_UINT_HASH_KEY)
+        {
+            pair->key = key;
+            pair->value = value;
+            return;
+        }
+    }
+
+    pair->key = key;
+    pair->value = value;
+}
+
 static void tick_camera(struct Input *input, struct Camera *camera, float dt)
 {
     //
@@ -80,11 +148,28 @@ static void tick_camera(struct Input *input, struct Camera *camera, float dt)
         camera->zoom_velocity = 0.0f;
 }
 
+static uint32 generate_ship_id(struct GameState *game_state)
+{
+    ASSERT(game_state->ship_ids < UINT32_MAX);
+
+    uint32 id = game_state->ship_ids;
+    ++game_state->ship_ids;
+
+    return id;
+}
+
 static struct Ship *new_ship(struct GameState *game_state)
 {
     ASSERT(game_state->ship_count < ARRAY_SIZE(game_state->ships));
 
-    struct Ship *ship = &game_state->ships[game_state->ship_count++];
+    uint32 array_index = game_state->ship_count;
+    ++game_state->ship_count;
+
+    struct Ship *ship = &game_state->ships[array_index];
+    ship->id = generate_ship_id(game_state);
+
+    emplace(&game_state->ship_id_map, ship->id, array_index);
+
     return ship;
 }
 
@@ -94,11 +179,17 @@ void init_game(struct GameMemory *memory)
     struct GameState *game_state = (struct GameState *)memory->game_memory;
 
     struct Camera *camera = &game_state->camera;
-    camera->zoom = 10.0f;
+    camera->zoom = 20.0f;
 
-    struct Ship *ship = new_ship(game_state);
-    ship->size = vec2_new(1, 1);
-    ship->move_velocity = vec2_new(0, 0);
+    game_state->ship_id_map = create_uint_hash_map();
+
+    for (uint32 i = 0; i < 4; ++i)
+    {
+        struct Ship *ship = new_ship(game_state);
+        ship->position = vec2_new(random_float(-5.0f, 5.0f), random_float(-5.0f, 5.0f));
+        ship->size = vec2_new(1, 1);
+        ship->move_velocity = vec2_new(0, 0);
+    }
 }
 
 static void tick_physics(struct GameState *game_state, float dt)
@@ -155,7 +246,7 @@ static vec2 screen_to_world_coords(vec2 screen_coords, struct Camera *camera, ui
 
     vec2 world_coords;
     world_coords.x = ((screen_coords.x / (float)screen_width) * 2.0f - 1.0f) * camera->zoom/2.0f;
-    world_coords.y = ((screen_coords.y / (float)screen_height) * 2.0f - 1.0f) * camera->zoom/2.0f / aspect_ratio;
+    world_coords.y = ((((float)screen_height - screen_coords.y) / (float)screen_height) * 2.0f - 1.0f) * camera->zoom/2.0f / aspect_ratio;
     world_coords = vec2_add(world_coords, camera->position);
     return world_coords;
 }
@@ -188,18 +279,85 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
 
     if (mouse_released(MOUSE_LEFT, input))
     {
-        struct AABB selection_box = calc_mouse_selection_box(input, MOUSE_LEFT);
+        // Clear previous selection.
+        game_state->selected_ship_count = 0;
 
-        selection_box.min = screen_to_world_coords(selection_box.min, &game_state->camera, screen_width, screen_height);
-        selection_box.max = screen_to_world_coords(selection_box.max, &game_state->camera, screen_width, screen_height);
+        struct AABB screen_selection_box = calc_mouse_selection_box(input, MOUSE_LEFT);
 
+        // Because screen space y-values are inverted, these two results have conflicting
+        // y-values, i.e. screen_to_world_min.y is actually the maximum y. These values
+        // are then properly min/maxed and stored correctly in world_selection_box.
+        vec2 screen_to_world_min = screen_to_world_coords(screen_selection_box.min, &game_state->camera, screen_width, screen_height);
+        vec2 screen_to_world_max = screen_to_world_coords(screen_selection_box.max, &game_state->camera, screen_width, screen_height);
+
+        struct AABB world_selection_box;
+        world_selection_box.min = min_vec2(screen_to_world_min, screen_to_world_max);
+        world_selection_box.max = max_vec2(screen_to_world_min, screen_to_world_max);
+
+        // Add colliding ships to the selection list.
+        // TODO: optimize, spatial grid hash?
         for (uint32 i = 0; i < game_state->ship_count; ++i)
         {
             struct Ship *ship = &game_state->ships[i];
             struct AABB ship_aabb = aabb_from_transform(ship->position, ship->size);
 
-            if (aabb_intersection(selection_box, ship_aabb))
-                ship->size = vec2_mul(ship->size, 2.0f);
+            vec2 center = vec2_div(vec2_add(ship_aabb.min, ship_aabb.max), 2.0f);
+
+            if (aabb_intersection(world_selection_box, ship_aabb))
+                game_state->selected_ships[game_state->selected_ship_count++] = ship->id;
+        }
+
+        if (game_state->selected_ship_count > 0)
+            fprintf(stderr, "selected %u ships\n", game_state->selected_ship_count);
+    }
+
+    if (mouse_down(MOUSE_RIGHT, input))
+    {
+        for (uint32 i = 0; i < game_state->selected_ship_count; ++i)
+        {
+            uint32 id = game_state->selected_ships[i];
+
+            struct UIntHashPair *id_pair = find_pair(&game_state->ship_id_map, id);
+            ASSERT_NOT_NULL(id_pair);
+
+            ASSERT(id_pair->value < game_state->ship_count);
+            struct Ship *ship = &game_state->ships[id_pair->value];
+
+            ship->target_position = screen_to_world_coords(input->mouse_position, &game_state->camera, screen_width, screen_height);
+            ship->move_order = true;
+        }
+    }
+
+    // Outline selected ships.
+    for (uint32 i = 0; i < game_state->selected_ship_count; ++i)
+    {
+        uint32 id = game_state->selected_ships[i];
+
+        struct UIntHashPair *id_pair = find_pair(&game_state->ship_id_map, id);
+        ASSERT_NOT_NULL(id_pair);
+
+        ASSERT(id_pair->value < game_state->ship_count);
+        struct Ship *ship = &game_state->ships[id_pair->value];
+
+        draw_quad_buffered(&render_buffer->quads, ship->position, vec2_mul(ship->size, 1.1f), vec4_zero(), vec3_new(0, 1, 0));
+    }
+
+    // Handle move orders.
+    for (uint32 i = 0; i < game_state->ship_count; ++i)
+    {
+        struct Ship *ship = &game_state->ships[i];
+        if (ship->move_order)
+        {
+            vec2 direction = vec2_normalize(vec2_sub(ship->target_position, ship->position));
+            ship->move_velocity = vec2_mul(direction, 2.0f);
+
+            draw_quad_buffered(&render_buffer->quads, ship->target_position, vec2_new(0.5f, 0.5f), vec4_zero(), vec3_new(0, 1, 0));
+
+            if (vec2_distance2(ship->position, ship->target_position) < 0.1f)
+            {
+                ship->move_velocity = vec2_zero();
+                ship->move_order = false;
+            }
         }
     }
 
