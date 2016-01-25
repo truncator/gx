@@ -340,6 +340,9 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
         struct Ship *ship = &game_state->ships[id_pair->value];
 
         draw_quad_buffered(&render_buffer->quads, ship->position, vec2_mul(ship->size, 1.1f), vec4_zero(), vec3_new(0, 1, 0));
+
+        if (ship->move_order)
+            draw_quad_buffered(&render_buffer->quads, ship->target_position, vec2_new(0.5f, 0.5f), vec4_zero(), vec3_new(0, 1, 0));
     }
 
     // Handle move orders.
@@ -350,8 +353,6 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
         {
             vec2 direction = vec2_normalize(vec2_sub(ship->target_position, ship->position));
             ship->move_velocity = vec2_mul(direction, 2.0f);
-
-            draw_quad_buffered(&render_buffer->quads, ship->target_position, vec2_new(0.5f, 0.5f), vec4_zero(), vec3_new(0, 1, 0));
 
             if (vec2_distance2(ship->position, ship->target_position) < 0.1f)
             {
