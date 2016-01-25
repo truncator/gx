@@ -224,6 +224,11 @@ vec3 calc_screen_ray(vec2 position, mat4 view_projection, uint32 screen_width, u
 }
 #endif
 
+vec2 vec2_zero(void)
+{
+    return vec2_new(0, 0);
+}
+
 vec2 vec2_new(float x, float y)
 {
     vec2 result;
@@ -232,9 +237,9 @@ vec2 vec2_new(float x, float y)
     return result;
 }
 
-vec2 vec2_zero(void)
+vec2 vec2_scalar(float s)
 {
-    return vec2_new(0, 0);
+    return vec2_new(s, s);
 }
 
 vec2 vec2_add(vec2 a, vec2 b)
