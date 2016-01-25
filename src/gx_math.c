@@ -297,6 +297,19 @@ vec2 vec2_normalize(vec2 v)
     return result;
 }
 
+float vec2_distance(vec2 a, vec2 b)
+{
+    return sqrtf(vec2_distance2(a, b));
+}
+
+float vec2_distance2(vec2 a, vec2 b)
+{
+    const float dx = a.x - b.x;
+    const float dy = a.y - b.y;
+
+    return (dx * dx) + (dy * dy);
+}
+
 vec2 vec2_direction(float rotation)
 {
     float x = cosf(rotation + PI_OVER_TWO);

@@ -110,6 +110,8 @@ vec2  vec2_negate(vec2 v);
 float vec2_length(vec2 v);
 float vec2_length2(vec2 v);
 vec2  vec2_normalize(vec2 v);
+float vec2_distance(vec2 a, vec2 b);
+float vec2_distance2(vec2 a, vec2 b);
 
 vec2  vec2_direction(float rotation);
 
