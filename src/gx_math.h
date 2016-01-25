@@ -106,6 +106,7 @@ vec2  vec2_sub(vec2 a, vec2 b);
 vec2  vec2_mul(vec2 v, float s);
 vec2  vec2_div(vec2 v, float s);
 vec2  vec2_negate(vec2 v);
+vec2  vec2_abs(vec2 v);
 
 float vec2_length(vec2 v);
 float vec2_length2(vec2 v);

@@ -279,6 +279,14 @@ vec2 vec2_negate(vec2 v)
     return result;
 }
 
+vec2 vec2_abs(vec2 v)
+{
+    vec2 result;
+    result.x = abs_float(v.x);
+    result.y = abs_float(v.y);
+    return result;
+}
+
 float vec2_length(vec2 v)
 {
     return sqrtf(vec2_length2(v));
