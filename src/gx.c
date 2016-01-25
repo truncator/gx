@@ -271,10 +271,10 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
 
         const uint32 outline_thickness = 1;
 
-        draw_screen_quad_buffered(&render_buffer->screen_quads, top_left, vec2_new(size.x, outline_thickness), vec4_zero(), vec3_new(1, 1, 0));
-        draw_screen_quad_buffered(&render_buffer->screen_quads, bottom_left, vec2_new(size.x, outline_thickness), vec4_zero(), vec3_new(1, 1, 0));
-        draw_screen_quad_buffered(&render_buffer->screen_quads, top_left, vec2_new(outline_thickness, size.y), vec4_zero(), vec3_new(1, 1, 0));
-        draw_screen_quad_buffered(&render_buffer->screen_quads, top_right, vec2_new(outline_thickness, size.y), vec4_zero(), vec3_new(1, 1, 0));
+        draw_screen_quad_buffered(render_buffer, top_left, vec2_new(size.x, outline_thickness), vec4_zero(), vec3_new(1, 1, 0));
+        draw_screen_quad_buffered(render_buffer, bottom_left, vec2_new(size.x, outline_thickness), vec4_zero(), vec3_new(1, 1, 0));
+        draw_screen_quad_buffered(render_buffer, top_left, vec2_new(outline_thickness, size.y), vec4_zero(), vec3_new(1, 1, 0));
+        draw_screen_quad_buffered(render_buffer, top_right, vec2_new(outline_thickness, size.y), vec4_zero(), vec3_new(1, 1, 0));
     }
 
     if (mouse_released(MOUSE_LEFT, input))
@@ -339,10 +339,10 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
         ASSERT(id_pair->value < game_state->ship_count);
         struct Ship *ship = &game_state->ships[id_pair->value];
 
-        draw_quad_buffered(&render_buffer->quads, ship->position, vec2_mul(ship->size, 1.1f), vec4_zero(), vec3_new(0, 1, 0));
+        draw_quad_buffered(render_buffer, ship->position, vec2_mul(ship->size, 1.1f), vec4_zero(), vec3_new(0, 1, 0));
 
         if (ship->move_order)
-            draw_quad_buffered(&render_buffer->quads, ship->target_position, vec2_new(0.5f, 0.5f), vec4_zero(), vec3_new(0, 1, 0));
+            draw_quad_buffered(render_buffer, ship->target_position, vec2_new(0.5f, 0.5f), vec4_zero(), vec3_new(0, 1, 0));
     }
 
     // Handle move orders.
@@ -393,13 +393,13 @@ void render_game(struct GameMemory *memory, struct Renderer *renderer, uint32 sc
     bind_program(0);
 
     bind_program(renderer->quad_program);
-    draw_quad_buffer(&renderer->sprite_batch, &render_buffer->quads);
+    draw_quad_buffer(&renderer->sprite_batch, render_buffer);
     bind_program(0);
 
     view_projection_matrix = mat4_orthographic(0, screen_width, screen_height, 0, 0, 1);
     update_ubo(renderer->camera_ubo, sizeof(mat4), &view_projection_matrix);
 
     bind_program(renderer->quad_program);
-    draw_screen_quad_buffer(&renderer->sprite_batch, &render_buffer->screen_quads);
+    draw_screen_quad_buffer(&renderer->sprite_batch, render_buffer);
     bind_program(0);
 }

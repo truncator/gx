@@ -136,8 +136,8 @@ void draw_line_buffer(struct LineBuffer *buffer, uint32 program);
 void clear_line_buffer(struct LineBuffer *buffer);
 #endif
 
-void draw_quad_buffered(struct QuadBuffer *buffer, vec2 position, vec2 size, vec4 uv, vec3 color);
-void draw_screen_quad_buffered(struct QuadBuffer *buffer, vec2 position, vec2 size, vec4 uv, vec3 color);
-void draw_quad_buffer(struct SpriteBatch *sprite_batch, struct QuadBuffer *buffer);
-void draw_screen_quad_buffer(struct SpriteBatch *sprite_batch, struct QuadBuffer *buffer);
+void draw_quad_buffered(struct RenderBuffer *render_buffer, vec2 position, vec2 size, vec4 uv, vec3 color);
+void draw_screen_quad_buffered(struct RenderBuffer *render_buffer, vec2 position, vec2 size, vec4 uv, vec3 color);
+void draw_quad_buffer(struct SpriteBatch *sprite_batch, struct RenderBuffer *render_buffer);
+void draw_screen_quad_buffer(struct SpriteBatch *sprite_batch, struct RenderBuffer *render_buffer);
 void clear_quad_buffer(struct QuadBuffer *buffer);

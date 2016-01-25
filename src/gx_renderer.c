@@ -436,8 +436,10 @@ void clear_line_buffer(struct LineBuffer *buffer)
 }
 #endif
 
-void draw_quad_buffered(struct QuadBuffer *buffer, vec2 position, vec2 size, vec4 uv, vec3 color)
+void draw_quad_buffered(struct RenderBuffer *render_buffer, vec2 position, vec2 size, vec4 uv, vec3 color)
 {
+    struct QuadBuffer *buffer = &render_buffer->quads;
+
     ASSERT(buffer->current_size < ARRAY_SIZE(buffer->quads));
     struct Quad *quad = &buffer->quads[buffer->current_size++];
 
@@ -447,8 +449,10 @@ void draw_quad_buffered(struct QuadBuffer *buffer, vec2 position, vec2 size, vec
     quad->color = color;
 }
 
-void draw_screen_quad_buffered(struct QuadBuffer *buffer, vec2 position, vec2 size, vec4 uv, vec3 color)
+void draw_screen_quad_buffered(struct RenderBuffer *render_buffer, vec2 position, vec2 size, vec4 uv, vec3 color)
 {
+    struct QuadBuffer *buffer = &render_buffer->screen_quads;
+
     ASSERT(buffer->current_size < ARRAY_SIZE(buffer->quads));
     struct Quad *quad = &buffer->quads[buffer->current_size++];
 
@@ -458,10 +462,11 @@ void draw_screen_quad_buffered(struct QuadBuffer *buffer, vec2 position, vec2 si
     quad->color = color;
 }
 
-void draw_quad_buffer(struct SpriteBatch *sprite_batch, struct QuadBuffer *buffer)
+void draw_quad_buffer(struct SpriteBatch *sprite_batch, struct RenderBuffer *render_buffer)
 {
     begin_sprite_batch(sprite_batch);
 
+    struct QuadBuffer *buffer = &render_buffer->quads;
     for (uint32 i = 0; i < buffer->current_size; ++i)
     {
         struct Quad *quad = &buffer->quads[i];
@@ -471,10 +476,11 @@ void draw_quad_buffer(struct SpriteBatch *sprite_batch, struct QuadBuffer *buffe
     end_sprite_batch(sprite_batch);
 }
 
-void draw_screen_quad_buffer(struct SpriteBatch *sprite_batch, struct QuadBuffer *buffer)
+void draw_screen_quad_buffer(struct SpriteBatch *sprite_batch, struct RenderBuffer *render_buffer)
 {
     begin_sprite_batch(sprite_batch);
 
+    struct QuadBuffer *buffer = &render_buffer->screen_quads;
     for (uint32 i = 0; i < buffer->current_size; ++i)
     {
         struct Quad *quad = &buffer->quads[i];
