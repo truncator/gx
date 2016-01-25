@@ -6,6 +6,17 @@
 struct Input;
 struct Renderer;
 
+struct UIntHashPair
+{
+    uint32 key;
+    uint32 value;
+};
+
+struct UIntHashMap
+{
+    struct UIntHashPair buckets[4096];
+};
+
 struct GameMemory
 {
     void *game_memory;
@@ -25,9 +36,16 @@ struct Camera
     float zoom_velocity;
 };
 
+enum ShipTeam
+{
+    TEAM_ALLY,
+    TEAM_ENEMY,
+};
+
 struct Ship
 {
     uint32 id;
+    uint8 team;
 
     vec2 position;
     float rotation;
@@ -38,6 +56,12 @@ struct Ship
 
     bool move_order;
     vec2 target_position;
+
+    int32 health;
+
+    // TODO: expand on this
+    float fire_cooldown;
+    float fire_cooldown_timer;
 };
 
 struct AABB
@@ -46,22 +70,27 @@ struct AABB
     vec2 max;
 };
 
-struct UIntHashPair
+struct Projectile
 {
-    uint32 key;
-    uint32 value;
-};
+    uint32 owner;
+    uint8 team;
+    int32 damage;
 
-struct UIntHashMap
-{
-    struct UIntHashPair buckets[4096];
+    vec2 position;
+    vec2 size;
+    vec2 velocity;
 };
 
 struct GameState
 {
     struct Camera camera;
 
-    struct Ship ships[8];
+
+    //
+    // ship
+    //
+
+    struct Ship ships[64];
     uint32 ship_count;
 
     uint32 ship_ids;
@@ -69,6 +98,14 @@ struct GameState
 
     uint32 selected_ships[256];
     uint32 selected_ship_count;
+
+
+    //
+    // projectile
+    //
+
+    struct Projectile projectiles[256];
+    uint32 projectile_count;
 };
 
 void init_game(struct GameMemory *memory);

@@ -70,6 +70,16 @@ static void emplace(struct UIntHashMap *map, uint32 key, uint32 value)
     pair->value = value;
 }
 
+static void remove_pair(struct UIntHashMap *map, uint32 key)
+{
+    struct UIntHashPair *pair = find_pair(map, key);
+    ASSERT(pair != NULL);
+
+    // Mark the pair as null.
+    pair->key = NULL_UINT_HASH_KEY;
+    pair->value = 0;
+}
+
 static struct AABB aabb_from_transform(vec2 center, vec2 size)
 {
     vec2 half_size = vec2_div(size, 2.0f);
@@ -169,6 +179,19 @@ static void tick_camera(struct Input *input, struct Camera *camera, float dt)
         camera->zoom_velocity = 0.0f;
 }
 
+static struct Ship *get_ship_by_id(struct GameState *game_state, uint32 id)
+{
+    struct UIntHashPair *pair = find_pair(&game_state->ship_id_map, id);
+    if (pair == NULL)
+        return NULL;
+
+    uint32 array_index = pair->value;
+    ASSERT(array_index < game_state->ship_count);
+
+    struct Ship *ship = &game_state->ships[array_index];
+    return ship;
+}
+
 static uint32 generate_ship_id(struct GameState *game_state)
 {
     ASSERT(game_state->ship_ids < UINT32_MAX);
@@ -179,7 +202,7 @@ static uint32 generate_ship_id(struct GameState *game_state)
     return id;
 }
 
-static struct Ship *new_ship(struct GameState *game_state)
+static struct Ship *create_ship(struct GameState *game_state)
 {
     ASSERT(game_state->ship_count < ARRAY_SIZE(game_state->ships));
 
@@ -194,6 +217,43 @@ static struct Ship *new_ship(struct GameState *game_state)
     return ship;
 }
 
+static void destroy_ship(struct GameState *game_state, struct Ship *ship)
+{
+    struct UIntHashPair *pair = find_pair(&game_state->ship_id_map, ship->id);
+    ASSERT_NOT_NULL(pair);
+
+    uint32 array_index = pair->value;
+    ASSERT(array_index < game_state->ship_count);
+
+    remove_pair(&game_state->ship_id_map, ship->id);
+
+    // Ship is already at the end of the array.
+    if (array_index == game_state->ship_count - 1)
+    {
+        --game_state->ship_count;
+        return;
+    }
+
+    // Swap the destroyed ship with the last active ship in the array.
+    struct Ship last = game_state->ships[game_state->ship_count - 1];
+    game_state->ships[array_index] = last;
+
+    --game_state->ship_count;
+
+    // Update the ship ID map with the swapped ship's new array index.
+    struct UIntHashPair *last_pair = find_pair(&game_state->ship_id_map, last.id);
+    ASSERT_NOT_NULL(last_pair);
+    last_pair->value = array_index;
+}
+
+static void damage_ship(struct GameState *game_state, struct Ship *ship, int32 damage)
+{
+    ship->health -= damage;
+
+    if (ship->health <= 0)
+        destroy_ship(game_state, ship);
+}
+
 void init_game(struct GameMemory *memory)
 {
     ASSERT(memory->game_memory_size >= sizeof(struct GameState));
@@ -204,17 +264,142 @@ void init_game(struct GameMemory *memory)
 
     game_state->ship_id_map = create_uint_hash_map();
 
-    for (uint32 i = 0; i < 4; ++i)
+    uint32 unit_count = 5;
+    for (uint32 i = 0; i < unit_count; ++i)
     {
-        struct Ship *ship = new_ship(game_state);
-        ship->position = vec2_new(random_float(-5.0f, 5.0f), random_float(-5.0f, 5.0f));
+        struct Ship *ship = create_ship(game_state);
+
         ship->size = vec2_new(1, 1);
         ship->move_velocity = vec2_new(0, 0);
+
+        float xp = 2.0f * ((float)i - unit_count/2.0f);
+        float yp = -camera->zoom/4.0f;
+        ship->position = vec2_new(xp, yp);
+
+        ship->health = 5;
+        ship->fire_cooldown = 2.0f;
+
+        ship->team = TEAM_ALLY;
+    }
+
+    for (uint32 i = 0; i < unit_count; ++i)
+    {
+        struct Ship *ship = create_ship(game_state);
+        ship->size = vec2_new(1, 1);
+        ship->move_velocity = vec2_new(0, 0);
+
+        float xp = 2.0f * ((float)i - unit_count/2.0f);
+        float yp = camera->zoom/4.0f;
+        ship->position = vec2_new(xp, yp);
+
+        ship->health = 5;
+        ship->fire_cooldown = 2.0f;
+
+        ship->team = TEAM_ENEMY;
+    }
+}
+
+static struct Ship *find_nearest_enemy(struct GameState *game_state, struct Ship *ship)
+{
+    struct Ship *nearest = NULL;
+    float min_distance = FLOAT_MAX;
+
+    for (uint32 i = 0; i < game_state->ship_count; ++i)
+    {
+        struct Ship *candidate = &game_state->ships[i];
+        if (candidate->team == ship->team)
+            continue;
+
+        float distance = vec2_distance2(candidate->position, ship->position);
+        if (distance < min_distance)
+        {
+            nearest = candidate;
+            min_distance = distance;
+        }
+    }
+
+    return nearest;
+}
+
+static struct Projectile *create_projectile(struct GameState *game_state)
+{
+    ASSERT(game_state->projectile_count < ARRAY_SIZE(game_state->projectiles));
+    struct Projectile *projectile = &game_state->projectiles[game_state->projectile_count++];
+    return projectile;
+}
+
+static void destroy_projectile(struct GameState *game_state, struct Projectile *projectile)
+{
+    ASSERT(game_state->projectile_count > 0);
+
+    // TODO: optimize if needed!
+    for (uint32 i = 0; i < game_state->projectile_count; ++i)
+    {
+        if (&game_state->projectiles[i] == projectile)
+        {
+            // Swap the projectile with the last active item in the array.
+            struct Projectile last = game_state->projectiles[game_state->projectile_count - 1];
+            game_state->projectiles[i] = last;
+
+            --game_state->projectile_count;
+
+            return;
+        }
+    }
+}
+
+static void fire_projectile(struct GameState *game_state, struct Ship *source, struct Ship *target, int32 damage)
+{
+    ASSERT(source != target);
+
+    source->fire_cooldown_timer = source->fire_cooldown;
+
+    struct Projectile *projectile = create_projectile(game_state);
+
+    projectile->owner = source->id;
+    projectile->team = source->team;
+    projectile->damage = damage;
+
+    projectile->position = source->position;
+    projectile->size = vec2_new(0.1f, 0.1f);
+
+    vec2 direction = vec2_normalize(vec2_sub(target->position, projectile->position));
+    projectile->velocity = vec2_mul(direction, 5.0f);
+}
+
+static void tick_combat(struct GameState *game_state, float dt)
+{
+    for (uint32 i = 0; i < game_state->ship_count; ++i)
+    {
+        struct Ship *ship = &game_state->ships[i];
+
+        if (ship->fire_cooldown_timer <= 0.0f)
+        {
+            struct Ship *target = find_nearest_enemy(game_state, ship);
+            if (target == NULL)
+                continue;
+
+            fire_projectile(game_state, ship, target, 1);
+        }
+        else
+        {
+            ship->fire_cooldown_timer -= dt;
+        }
     }
 }
 
 static void tick_physics(struct GameState *game_state, float dt)
 {
+    // Projectile kinematics.
+    for (uint32 i = 0; i < game_state->projectile_count; ++i)
+    {
+        struct Projectile *projectile = &game_state->projectiles[i];
+
+        // r = r0 + (v*t) + (a*t^2)/2
+        projectile->position = vec2_add(projectile->position, vec2_mul(projectile->velocity, dt));
+    }
+
+    // Ship kinematics.
     for (uint32 i = 0; i < game_state->ship_count; ++i)
     {
         struct Ship *ship = &game_state->ships[i];
@@ -228,7 +413,45 @@ static void tick_physics(struct GameState *game_state, float dt)
         ship->position = vec2_add(vec2_add(ship->position, vec2_mul(ship->move_velocity, dt)), vec2_div(vec2_mul(move_acceleration, dt * dt), 2.0f));
     }
 
+    //
     // TODO: spatial hashing
+    //
+
+    // Projectile-ship collision.
+    for (uint32 i = 0; i < game_state->projectile_count; ++i)
+    {
+        struct Projectile *projectile = &game_state->projectiles[i];
+        struct AABB projectile_aabb = aabb_from_transform(projectile->position, projectile->size);
+
+        // NOTE: owner may be dead and destroyed at this point, so checking for NULL might be required.
+        struct Ship *owner = get_ship_by_id(game_state, projectile->owner);
+
+        for (uint32 j = 0; j < game_state->ship_count; ++j)
+        {
+            struct Ship *ship = &game_state->ships[j];
+            if (ship->id == projectile->owner)
+                continue;
+
+#if 0
+            // Allow projectiles to pass through teammates.
+            if (ship->team == projectile->team)
+                continue;
+#endif
+
+            struct AABB ship_aabb = aabb_from_transform(ship->position, ship->size);
+
+            if (aabb_intersection(projectile_aabb, ship_aabb))
+            {
+                // Disable friendly fire.
+                if (ship->team != projectile->team)
+                    damage_ship(game_state, ship, projectile->damage);
+
+                destroy_projectile(game_state, projectile);
+            }
+        }
+    }
+
+    // Ship-ship collision.
     for (uint32 i = 0; i < game_state->ship_count - 1; ++i)
     {
         struct Ship *a = &game_state->ships[i];
@@ -375,12 +598,7 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
         for (uint32 i = 0; i < game_state->selected_ship_count; ++i)
         {
             uint32 id = game_state->selected_ships[i];
-
-            struct UIntHashPair *id_pair = find_pair(&game_state->ship_id_map, id);
-            ASSERT_NOT_NULL(id_pair);
-
-            ASSERT(id_pair->value < game_state->ship_count);
-            struct Ship *ship = &game_state->ships[id_pair->value];
+            struct Ship *ship = get_ship_by_id(game_state, id);
 
             ship->target_position = screen_to_world_coords(input->mouse_position, &game_state->camera, screen_width, screen_height);
             ship->move_order = true;
@@ -391,12 +609,7 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
     for (uint32 i = 0; i < game_state->selected_ship_count; ++i)
     {
         uint32 id = game_state->selected_ships[i];
-
-        struct UIntHashPair *id_pair = find_pair(&game_state->ship_id_map, id);
-        ASSERT_NOT_NULL(id_pair);
-
-        ASSERT(id_pair->value < game_state->ship_count);
-        struct Ship *ship = &game_state->ships[id_pair->value];
+        struct Ship *ship = get_ship_by_id(game_state, id);
 
         draw_quad_buffered(render_buffer, ship->position, vec2_mul(ship->size, 1.1f), vec4_zero(), vec3_new(0, 1, 0));
 
@@ -422,7 +635,39 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
     }
 
     tick_camera(input, &game_state->camera, dt);
+
+    tick_combat(game_state, dt);
     tick_physics(game_state, dt);
+}
+
+static void draw_ships(struct GameState *game_state, struct Renderer *renderer)
+{
+    bind_program(renderer->quad_program);
+    begin_sprite_batch(&renderer->sprite_batch);
+
+    for (uint32 i = 0; i < game_state->ship_count; ++i)
+    {
+        struct Ship *ship = &game_state->ships[i];
+        draw_quad(&renderer->sprite_batch, ship->position, ship->size, vec3_new(0.5f, 0.5f, 0.5f));
+    }
+
+    end_sprite_batch(&renderer->sprite_batch);
+    bind_program(0);
+}
+
+static void draw_projectiles(struct GameState *game_state, struct Renderer *renderer)
+{
+    bind_program(renderer->quad_program);
+    begin_sprite_batch(&renderer->sprite_batch);
+
+    for (uint32 i = 0; i < game_state->projectile_count; ++i)
+    {
+        struct Projectile *projectile = &game_state->projectiles[i];
+        draw_quad(&renderer->sprite_batch, projectile->position, projectile->size, vec3_new(0.0f, 1.0f, 0.0f));
+    }
+
+    end_sprite_batch(&renderer->sprite_batch);
+    bind_program(0);
 }
 
 void render_game(struct GameMemory *memory, struct Renderer *renderer, uint32 screen_width, uint32 screen_height)
@@ -439,17 +684,8 @@ void render_game(struct GameMemory *memory, struct Renderer *renderer, uint32 sc
 
     update_ubo(renderer->camera_ubo, sizeof(mat4), &view_projection_matrix);
 
-    bind_program(renderer->quad_program);
-    begin_sprite_batch(&renderer->sprite_batch);
-
-    for (uint32 i = 0; i < game_state->ship_count; ++i)
-    {
-        struct Ship *ship = &game_state->ships[i];
-        draw_quad(&renderer->sprite_batch, ship->position, ship->size, vec3_new(0.5f, 0.5f, 0.5f));
-    }
-
-    end_sprite_batch(&renderer->sprite_batch);
-    bind_program(0);
+    draw_ships(game_state, renderer);
+    draw_projectiles(game_state, renderer);
 
     bind_program(renderer->quad_program);
     draw_quad_buffer(&renderer->sprite_batch, render_buffer);
