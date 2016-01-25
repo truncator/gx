@@ -58,6 +58,7 @@ float cosf(float x);
 
 float degrees_to_radians(float degrees);
 
+// TODO: change back to type_operation
 int32  min_int32(int32 a, int32 b);
 int32  max_int32(int32 a, int32 b);
 uint32 min_uint32(uint32 a, uint32 b);

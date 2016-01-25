@@ -70,6 +70,27 @@ static void emplace(struct UIntHashMap *map, uint32 key, uint32 value)
     pair->value = value;
 }
 
+static struct AABB aabb_from_transform(vec2 center, vec2 size)
+{
+    vec2 half_size = vec2_div(size, 2.0f);
+
+    struct AABB aabb;
+    aabb.min = vec2_sub(center, half_size);
+    aabb.max = vec2_add(center, half_size);
+    return aabb;
+}
+
+static bool aabb_intersection(struct AABB a, struct AABB b)
+{
+    if ((a.max.x > b.min.x) && (a.min.x < b.max.x))
+    {
+        if ((a.max.y > b.min.y) && (a.min.y < b.max.y))
+            return true;
+    }
+
+    return false;
+}
+
 static void tick_camera(struct Input *input, struct Camera *camera, float dt)
 {
     //
@@ -206,6 +227,65 @@ static void tick_physics(struct GameState *game_state, float dt)
         // r = r0 + (v*t) + (a*t^2)/2
         ship->position = vec2_add(vec2_add(ship->position, vec2_mul(ship->move_velocity, dt)), vec2_div(vec2_mul(move_acceleration, dt * dt), 2.0f));
     }
+
+    // TODO: spatial hashing
+    for (uint32 i = 0; i < game_state->ship_count - 1; ++i)
+    {
+        struct Ship *a = &game_state->ships[i];
+        struct AABB a_aabb = aabb_from_transform(a->position, a->size);
+        vec2 a_center = vec2_div(vec2_add(a_aabb.min, a_aabb.max), 2.0f);
+        vec2 a_half_extents = vec2_div(vec2_sub(a_aabb.max, a_aabb.min), 2.0f);
+
+        for (uint32 j = i + 1; j < game_state->ship_count; ++j)
+        {
+            struct Ship *b = &game_state->ships[j];
+            struct AABB b_aabb = aabb_from_transform(b->position, b->size);
+
+            if (aabb_intersection(a_aabb, b_aabb))
+            {
+                vec2 b_center = vec2_div(vec2_add(b_aabb.min, b_aabb.max), 2.0f);
+                vec2 b_half_extents = vec2_div(vec2_sub(b_aabb.max, b_aabb.min), 2.0f);
+
+                vec2 intersection = vec2_sub(vec2_abs(vec2_sub(b_center, a_center)), vec2_add(a_half_extents, b_half_extents));
+                if (intersection.x > intersection.y)
+                {
+                    if (abs_float(a->move_velocity.x) > abs_float(b->move_velocity.x))
+                        a->move_velocity.x = 0.0f;
+                    else
+                        b->move_velocity.x = 0.0f;
+
+                    if (a->position.x < b->position.x)
+                    {
+                        a->position.x += intersection.x/2.0f;
+                        b->position.x -= intersection.x/2.0f;
+                    }
+                    else
+                    {
+                        a->position.x -= intersection.x/2.0f;
+                        b->position.x += intersection.x/2.0f;
+                    }
+                }
+                else
+                {
+                    if (abs_float(a->move_velocity.y) > abs_float(b->move_velocity.y))
+                        a->move_velocity.y = 0.0f;
+                    else
+                        b->move_velocity.y = 0.0f;
+
+                    if (a->position.y < b->position.y)
+                    {
+                        a->position.y += intersection.y/2.0f;
+                        b->position.y -= intersection.y/2.0f;
+                    }
+                    else
+                    {
+                        a->position.y -= intersection.y/2.0f;
+                        b->position.y += intersection.y/2.0f;
+                    }
+                }
+            }
+        }
+    }
 }
 
 static struct AABB calc_mouse_selection_box(struct Input *input, uint32 mouse_button)
@@ -217,27 +297,6 @@ static struct AABB calc_mouse_selection_box(struct Input *input, uint32 mouse_bu
     aabb.min = min_vec2(origin, end);
     aabb.max = max_vec2(origin, end);
     return aabb;
-}
-
-static struct AABB aabb_from_transform(vec2 center, vec2 size)
-{
-    vec2 half_size = vec2_div(size, 2.0f);
-
-    struct AABB aabb;
-    aabb.min = vec2_sub(center, half_size);
-    aabb.max = vec2_add(center, half_size);
-    return aabb;
-}
-
-static bool aabb_intersection(struct AABB a, struct AABB b)
-{
-    if ((a.max.x > b.min.x) && (a.min.x < b.max.x))
-    {
-        if ((a.max.y > b.min.y) && (a.min.y < b.max.y))
-            return true;
-    }
-
-    return false;
 }
 
 static vec2 screen_to_world_coords(vec2 screen_coords, struct Camera *camera, uint32 screen_width, uint32 screen_height)
