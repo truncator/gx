@@ -322,6 +322,11 @@ bool vec2_equal(vec2 a, vec2 b)
     return (a.x == b.x) && (a.y == b.y);
 }
 
+vec3 vec3_zero(void)
+{
+    return vec3_new(0, 0, 0);
+}
+
 vec3 vec3_new(float x, float y, float z)
 {
     vec3 result;
@@ -329,11 +334,6 @@ vec3 vec3_new(float x, float y, float z)
     result.y = y;
     result.z = z;
     return result;
-}
-
-vec3 vec3_zero(void)
-{
-    return vec3_new(0, 0, 0);
 }
 
 vec3 vec3_scalar(float s)
@@ -448,6 +448,11 @@ bool vec3_equal(vec3 a, vec3 b)
     return (a.x == b.x) && (a.y == b.y) && (a.z == b.z);
 }
 
+vec4 vec4_zero(void)
+{
+    return vec4_new(0, 0, 0, 0);
+}
+
 vec4 vec4_new(float x, float y, float z, float w)
 {
     vec4 result;
@@ -456,11 +461,6 @@ vec4 vec4_new(float x, float y, float z, float w)
     result.z = z;
     result.w = w;
     return result;
-}
-
-vec4 vec4_zero(void)
-{
-    return vec4_new(0, 0, 0, 0);
 }
 
 vec4 vec4_mul(vec4 v, float s)

@@ -122,8 +122,8 @@ bool  vec2_equal(vec2 a, vec2 b);
 // vec3
 //
 
-vec3  vec3_new(float x, float y, float z);
 vec3  vec3_zero(void);
+vec3  vec3_new(float x, float y, float z);
 vec3  vec3_scalar(float s);
 
 vec3  vec3_add(vec3 a, vec3 b);
@@ -150,8 +150,8 @@ bool  vec3_equal(vec3 a, vec3 b);
 // vec4
 //
 
-vec4 vec4_new(float x, float y, float z, float w);
 vec4 vec4_zero(void);
+vec4 vec4_new(float x, float y, float z, float w);
 
 vec4 vec4_mul(vec4 v, float s);
 vec4 vec4_div(vec4 v, float s);
