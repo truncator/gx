@@ -242,6 +242,11 @@ vec2 vec2_scalar(float s)
     return vec2_new(s, s);
 }
 
+vec2 vec2_from_vec3(vec3 v)
+{
+    return vec2_new(v.x, v.y);
+}
+
 vec2 vec2_add(vec2 a, vec2 b)
 {
     vec2 result;

@@ -1,5 +1,6 @@
 #include "gx_renderer.h"
 #include "gx_io.h"
+#include "gx.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,8 +9,6 @@
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include <stb/stb_truetype.h>
-
-//static struct TextBuffer global_text_buffer;
 
 static uint32 create_shader(const char *source, uint32 type)
 {
@@ -35,9 +34,31 @@ static uint32 create_program(uint32 vertex_shader, uint32 fragment_shader)
     return program;
 }
 
+vec2 screen_to_world_coords(vec2 screen_coords, struct Camera *camera, uint32 screen_width, uint32 screen_height)
+{
+    float aspect_ratio = (float)screen_width / (float)screen_height;
+
+    vec2 world_coords;
+    world_coords.x = ((screen_coords.x / (float)screen_width) * 2.0f - 1.0f) * camera->zoom/2.0f;
+    world_coords.y = ((((float)screen_height - screen_coords.y) / (float)screen_height) * 2.0f - 1.0f) * camera->zoom/2.0f / aspect_ratio;
+    world_coords = vec2_add(world_coords, camera->position);
+    return world_coords;
+}
+
+vec2 world_to_screen_coords(vec2 world_coords, struct Camera *camera, uint32 screen_width, uint32 screen_height)
+{
+    float aspect_ratio = (float)screen_width / (float)screen_height;
+
+    vec2 screen_coords = vec2_sub(world_coords, camera->position);
+    screen_coords.x = (screen_coords.x / (camera->zoom/2.0f) + 1.0f) / 2.0f * (float)screen_width;
+    screen_coords.y = (float)screen_height - ((screen_coords.y * aspect_ratio) / (camera->zoom/2.0f) + 1.0f) / 2.0f * (float)screen_height;
+    return screen_coords;
+}
+
 struct Renderer init_renderer(void)
 {
-    glEnable(GL_DEPTH_TEST);
+    // TODO: manual depth sorting
+    glDisable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -45,11 +66,18 @@ struct Renderer init_renderer(void)
 
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
+#if 0
+    glDisable(GL_CULL_FACE);
+#endif
+
     struct Renderer renderer = {0};
 
     renderer.sprite_batch = create_sprite_batch(1000);
 
+    renderer.debug_font = load_font("ProggyClean");
+
     renderer.quad_program = load_program("quad");
+    renderer.text_program = load_program("text");
 
     renderer.camera_ubo = generate_ubo(sizeof(mat4), UBO_CAMERA);
     glGenVertexArrays(1, &renderer.blank_vao);
@@ -59,6 +87,15 @@ struct Renderer init_renderer(void)
 
 void clean_renderer(struct Renderer *renderer)
 {
+    free_sprite_batch(&renderer->sprite_batch);
+
+    free_program(renderer->quad_program);
+    free_program(renderer->text_program);
+
+    free_texture(&renderer->debug_font.texture);
+
+    free_ubo(&renderer->camera_ubo);
+
     glDeleteVertexArrays(1, &renderer->blank_vao);
 }
 
@@ -84,6 +121,11 @@ uint32 generate_ubo(uint32 size, uint32 binding)
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
     return id;
+}
+
+void free_ubo(uint32 *id)
+{
+    glDeleteBuffers(1, id);
 }
 
 void update_ubo(uint32 ubo, size_t size, void *data)
@@ -198,20 +240,31 @@ void free_texture(uint32 *id)
     glDeleteTextures(1, id);
 }
 
-struct SpriteBatch create_sprite_batch(uint32 size)
+void bind_texture(uint32 id)
+{
+    glBindTexture(GL_TEXTURE_2D, id);
+}
+
+void bind_texture_unit(uint32 unit)
+{
+    glActiveTexture(GL_TEXTURE0 + unit);
+}
+
+struct SpriteBatch create_sprite_batch(uint32 quad_capacity)
 {
     struct SpriteBatch batch = {0};
-    batch.max_size = size;
+    batch.max_quad_count = quad_capacity;
 
-    batch.data = malloc(batch.max_size * 4 * sizeof(struct SpriteVertex));
+    size_t batch_data_size = batch.max_quad_count * 4 * sizeof(struct SpriteVertex);
+    batch.data = malloc(batch_data_size);
     ASSERT_NOT_NULL(batch.data);
 
     glGenBuffers(1, &batch.vbo);
     glBindBuffer(GL_ARRAY_BUFFER, batch.vbo);
-    glBufferData(GL_ARRAY_BUFFER, batch.max_size * 4 * sizeof(struct SpriteVertex), NULL, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, batch_data_size, NULL, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    uint32 index_count = batch.max_size * 6;
+    uint32 index_count = batch.max_quad_count * 6;
     uint32 *index_data = malloc(index_count * sizeof(uint32));
     ASSERT_NOT_NULL(index_data);
     for (uint32 i = 0, face_offset = 0; i < index_count; i += 6, face_offset += 4)
@@ -253,6 +306,12 @@ struct SpriteBatch create_sprite_batch(uint32 size)
     return batch;
 }
 
+void free_sprite_batch(struct SpriteBatch *batch)
+{
+    ASSERT_NOT_NULL(batch->data);
+    free(batch->data);
+}
+
 void begin_sprite_batch(struct SpriteBatch *batch)
 {
     ASSERT(!batch->drawing);
@@ -270,48 +329,49 @@ void end_sprite_batch(struct SpriteBatch *batch)
 void flush_sprite_batch(struct SpriteBatch *batch)
 {
     ASSERT(batch->drawing);
-    if (batch->current_size == 0)
+    if (batch->current_quad_count == 0)
         return;
 
     glBindBuffer(GL_ARRAY_BUFFER, batch->vbo);
-    glBufferData(GL_ARRAY_BUFFER, batch->current_size * 4 * sizeof(struct SpriteVertex), NULL, GL_DYNAMIC_DRAW);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, batch->current_size * 4 * sizeof(struct SpriteVertex), batch->data);
+    glBufferData(GL_ARRAY_BUFFER, batch->current_quad_count * 4 * sizeof(struct SpriteVertex), NULL, GL_DYNAMIC_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, batch->current_quad_count * 4 * sizeof(struct SpriteVertex), batch->data);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     glBindVertexArray(batch->vao);
-    glDrawElements(GL_TRIANGLES, batch->current_size * 6, GL_UNSIGNED_INT, 0);
+    glDrawElements(GL_TRIANGLES, batch->current_quad_count * 6, GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
 
-    batch->current_size = 0;
+    batch->current_quad_count = 0;
 }
 
-static void add_quad_to_sprite_batch(struct SpriteBatch *batch, vec3 bottom_left, vec3 bottom_right, vec3 top_right, vec3 top_left, vec3 color)
+static void add_quad_to_sprite_batch(struct SpriteBatch *batch, vec2 bottom_left, vec2 bottom_right, vec2 top_right, vec2 top_left, vec4 uv, vec3 color)
 {
-    uint32 index = 4 * batch->current_size;
-    if (index + 3 >= batch->max_size)
+    if (batch->current_quad_count >= batch->max_quad_count - 1)
         flush_sprite_batch(batch);
 
-    struct SpriteVertex *v0 = &batch->data[index++];
-    v0->position = vec2_new(bottom_left.x, bottom_left.y);
-    v0->uv = vec2_zero();
+    uint32 vertex_index = batch->current_quad_count * 4;
+
+    struct SpriteVertex *v0 = &batch->data[vertex_index + 0];
+    v0->position = bottom_left;
+    v0->uv = vec2_new(uv.x, uv.y + uv.w);
     v0->color = color;
 
-    struct SpriteVertex *v1 = &batch->data[index++];
-    v1->position = vec2_new(bottom_right.x, bottom_right.y);
-    v1->uv = vec2_zero();
+    struct SpriteVertex *v1 = &batch->data[vertex_index + 1];
+    v1->position = bottom_right;
+    v1->uv = vec2_new(uv.x + uv.z, uv.y + uv.w);
     v1->color = color;
 
-    struct SpriteVertex *v2 = &batch->data[index++];
-    v2->position = vec2_new(top_right.x, top_right.y);
-    v2->uv = vec2_zero();
+    struct SpriteVertex *v2 = &batch->data[vertex_index + 2];
+    v2->position = top_right;
+    v2->uv = vec2_new(uv.x + uv.z, uv.y);
     v2->color = color;
 
-    struct SpriteVertex *v3 = &batch->data[index++];
-    v3->position = vec2_new(top_left.x, top_left.y);
-    v3->uv = vec2_zero();
+    struct SpriteVertex *v3 = &batch->data[vertex_index + 3];
+    v3->position = top_left;
+    v3->uv = vec2_new(uv.x, uv.y);
     v3->color = color;
 
-    ++batch->current_size;
+    ++batch->current_quad_count;
 }
 
 void draw_quad(struct SpriteBatch *batch, vec2 position, vec2 size, vec3 color)
@@ -327,7 +387,12 @@ void draw_quad(struct SpriteBatch *batch, vec2 position, vec2 size, vec3 color)
     vec3 top_right    = mat4_mul_vec3(matrix, vec3_new( 0.5f,  0.5f, 0.0f));
     vec3 top_left     = mat4_mul_vec3(matrix, vec3_new(-0.5f,  0.5f, 0.0f));
 
-    add_quad_to_sprite_batch(batch, bottom_left, bottom_right, top_right, top_left, color);
+    add_quad_to_sprite_batch(batch,
+                             vec2_from_vec3(bottom_left),
+                             vec2_from_vec3(bottom_right),
+                             vec2_from_vec3(top_right),
+                             vec2_from_vec3(top_left),
+                             vec4_zero(), color);
 }
 
 static void draw_screen_quad(struct SpriteBatch *batch, vec2 position, vec2 size, vec3 color)
@@ -343,30 +408,45 @@ static void draw_screen_quad(struct SpriteBatch *batch, vec2 position, vec2 size
     vec3 top_right    = mat4_mul_vec3(matrix, vec3_new(1.0f, 0.0f, 0.0f));
     vec3 top_left     = mat4_mul_vec3(matrix, vec3_new(0.0f, 0.0f, 0.0f));
 
-    add_quad_to_sprite_batch(batch, bottom_left, bottom_right, top_right, top_left, color);
+    add_quad_to_sprite_batch(batch,
+                             vec2_from_vec3(bottom_left),
+                             vec2_from_vec3(bottom_right),
+                             vec2_from_vec3(top_right),
+                             vec2_from_vec3(top_left),
+                             vec4_zero(), color);
 }
 
-#if 0
-void draw_text(const char *string, vec3 color)
+void draw_text(const char *string, vec3 color, struct TextBuffer *buffer)
 {
-    ASSERT(global_text_buffer.current_size < ARRAY_SIZE(global_text_buffer.texts));
-    struct Text *text = &global_text_buffer.texts[global_text_buffer.current_size++];
-
-    text->position = global_text_buffer.cursor;
-    strcpy(text->string, string);
-    text->color = color;
+    draw_screen_text(string, buffer->cursor, color, buffer);
 
     // TODO: non-hardcoded font size
-    global_text_buffer.cursor.y += 13;
+    buffer->cursor.y += 13;
 }
 
-void draw_global_text_buffer(struct SpriteBatch *sprite_batch, struct Font *font)
+void draw_screen_text(const char *string, vec2 position, vec3 color, struct TextBuffer *buffer)
+{
+    ASSERT(buffer->current_size < ARRAY_SIZE(buffer->texts));
+    struct Text *text = &buffer->texts[buffer->current_size++];
+
+    strcpy(text->string, string);
+    text->position = position;
+    text->color = color;
+}
+
+void draw_world_text(const char *string, vec2 position, vec3 color, struct TextBuffer *buffer, struct Camera *camera, uint32 screen_width, uint32 screen_height)
+{
+    vec2 screen_coords = world_to_screen_coords(position, camera, screen_width, screen_height);
+    draw_screen_text(string, screen_coords, color, buffer);
+}
+
+void draw_text_buffer(struct SpriteBatch *sprite_batch, struct Font *font, struct TextBuffer *buffer)
 {
     begin_sprite_batch(sprite_batch);
 
-    for (uint32 i = 0; i < global_text_buffer.current_size; ++i)
+    for (uint32 i = 0; i < buffer->current_size; ++i)
     {
-        struct Text *text = &global_text_buffer.texts[i];
+        struct Text *text = &buffer->texts[i];
 
         float x = text->position.x;
         float y = text->position.y;
@@ -384,24 +464,22 @@ void draw_global_text_buffer(struct SpriteBatch *sprite_batch, struct Font *font
 
             position.y -= size.y;
 
-            struct Quad quad = {0};
-            quad.position = vec3_new(position.x, position.y, 0.0f);
-            quad.size     = vec3_new(size.x, size.y, 1.0f);
-            quad.uv       = uv;
-            quad.color    = text->color;
-            add_quad_to_sprite_batch(sprite_batch, &quad);
+            vec2 top_left = vec2_new(position.x, position.y);
+            vec2 top_right = vec2_new(position.x + size.x, position.y);
+            vec2 bottom_left = vec2_new(position.x, position.y + size.y);
+            vec2 bottom_right = vec2_new(position.x + size.x, position.y + size.y);
+            add_quad_to_sprite_batch(sprite_batch, bottom_left, bottom_right, top_right, top_left, uv, text->color);
         }
     }
 
     end_sprite_batch(sprite_batch);
 }
 
-void clear_global_text_buffer()
+void clear_text_buffer(struct TextBuffer *buffer)
 {
-    global_text_buffer.current_size = 0;
-    global_text_buffer.cursor = vec2_new(2, 2);
+    buffer->current_size = 0;
+    buffer->cursor = vec2_new(2, 2);
 }
-#endif
 
 #if 0
 void draw_line(struct LineBuffer *buffer, vec3 start, vec3 end, vec3 color)
@@ -436,9 +514,9 @@ void clear_line_buffer(struct LineBuffer *buffer)
 }
 #endif
 
-void draw_quad_buffered(struct RenderBuffer *render_buffer, vec2 position, vec2 size, vec4 uv, vec3 color)
+void draw_world_quad_buffered(struct RenderBuffer *render_buffer, vec2 position, vec2 size, vec4 uv, vec3 color)
 {
-    struct QuadBuffer *buffer = &render_buffer->quads;
+    struct QuadBuffer *buffer = &render_buffer->world_quads;
 
     ASSERT(buffer->current_size < ARRAY_SIZE(buffer->quads));
     struct Quad *quad = &buffer->quads[buffer->current_size++];
@@ -456,17 +534,17 @@ void draw_screen_quad_buffered(struct RenderBuffer *render_buffer, vec2 position
     ASSERT(buffer->current_size < ARRAY_SIZE(buffer->quads));
     struct Quad *quad = &buffer->quads[buffer->current_size++];
 
-    quad->position = vec2_new(position.x, position.y);
-    quad->size = vec2_new(size.x, size.y);
+    quad->position = position;
+    quad->size = size;
     quad->uv = uv;
     quad->color = color;
 }
 
-void draw_quad_buffer(struct SpriteBatch *sprite_batch, struct RenderBuffer *render_buffer)
+void draw_world_quad_buffer(struct SpriteBatch *sprite_batch, struct RenderBuffer *render_buffer)
 {
     begin_sprite_batch(sprite_batch);
 
-    struct QuadBuffer *buffer = &render_buffer->quads;
+    struct QuadBuffer *buffer = &render_buffer->world_quads;
     for (uint32 i = 0; i < buffer->current_size; ++i)
     {
         struct Quad *quad = &buffer->quads[i];
@@ -490,7 +568,14 @@ void draw_screen_quad_buffer(struct SpriteBatch *sprite_batch, struct RenderBuff
     end_sprite_batch(sprite_batch);
 }
 
-void clear_quad_buffer(struct QuadBuffer *buffer)
+static void clear_quad_buffer(struct QuadBuffer *buffer)
 {
     buffer->current_size = 0;
+}
+
+void clear_render_buffer(struct RenderBuffer *buffer)
+{
+    clear_text_buffer(&buffer->text);
+    clear_quad_buffer(&buffer->world_quads);
+    clear_quad_buffer(&buffer->screen_quads);
 }

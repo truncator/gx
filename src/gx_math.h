@@ -101,6 +101,7 @@ float fractal_noise(float x, float y, float z, uint32 octaves, float frequency, 
 vec2  vec2_zero(void);
 vec2  vec2_new(float x, float y);
 vec2  vec2_scalar(float s);
+vec2  vec2_from_vec3(vec3 v);
 
 vec2  vec2_add(vec2 a, vec2 b);
 vec2  vec2_sub(vec2 a, vec2 b);

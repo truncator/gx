@@ -4,6 +4,8 @@
 #include "gx_math.h"
 #include <stb/stb_truetype.h>
 
+struct Camera;
+
 struct SpriteVertex
 {
     vec2 position;
@@ -19,9 +21,8 @@ struct SpriteBatch
 
     bool drawing;
 
-    // Number of quads.
-    uint32 current_size;
-    uint32 max_size;
+    uint32 current_quad_count;
+    uint32 max_quad_count;
 
     struct SpriteVertex *data;
 };
@@ -42,7 +43,7 @@ struct Text
 
 struct TextBuffer
 {
-    struct Text texts[512];
+    struct Text texts[1024];
     uint32 current_size;
 
     // Auto-formatting.
@@ -83,8 +84,9 @@ enum UniformBuffer
 
 struct RenderBuffer
 {
-    struct QuadBuffer quads;
+    struct QuadBuffer world_quads;
     struct QuadBuffer screen_quads;
+    struct TextBuffer text;
 };
 
 struct Renderer
@@ -92,15 +94,26 @@ struct Renderer
     struct SpriteBatch sprite_batch;
 
     uint32 quad_program;
+    uint32 text_program;
+
+    struct Font debug_font;
 
     uint32 camera_ubo;
     uint32 blank_vao;
 };
 
+
+//
+// utility
+//
+
+vec2 screen_to_world_coords(vec2 screen_coords, struct Camera *camera, uint32 screen_width, uint32 screen_height);
+
 struct Renderer init_renderer(void);
 void clean_renderer(struct Renderer *renderer);
 
 uint32 generate_ubo(uint32 size, uint32 binding);
+void free_ubo(uint32 *id);
 void update_ubo(uint32 ubo, size_t size, void *data);
 
 uint32 load_program(const char *name);
@@ -115,8 +128,11 @@ void set_uniform_mat4(const char *name, uint32 program, mat4 value);
 
 struct Font load_font(const char *name);
 void free_texture(uint32 *id);
+void bind_texture(uint32 id);
+void bind_texture_unit(uint32 unit);
 
-struct SpriteBatch create_sprite_batch(uint32 size);
+struct SpriteBatch create_sprite_batch(uint32 quad_capacity);
+void free_sprite_batch(struct SpriteBatch *batch);
 
 void begin_sprite_batch(struct SpriteBatch *batch);
 void end_sprite_batch(struct SpriteBatch *batch);
@@ -124,11 +140,12 @@ void flush_sprite_batch(struct SpriteBatch *batch);
 
 void draw_quad(struct SpriteBatch *batch, vec2 position, vec2 size, vec3 color);
 
-#if 0
-void draw_text(const char *string, vec3 color);
-void draw_global_text_buffer(struct SpriteBatch *sprite_batch, struct Font *font);
-void clear_global_text_buffer(void);
-#endif
+// TODO: clean up these arguments
+void draw_text(const char *string, vec3 color, struct TextBuffer *buffer);
+void draw_screen_text(const char *string, vec2 position, vec3 color, struct TextBuffer *buffer);
+void draw_world_text(const char *string, vec2 position, vec3 color, struct TextBuffer *buffer, struct Camera *camera, uint32 screen_width, uint32 screen_height);
+void draw_text_buffer(struct SpriteBatch *sprite_batch, struct Font *font, struct TextBuffer *text_buffer);
+void clear_text_buffer(struct TextBuffer *buffer);
 
 #if 0
 void draw_line(struct LineBuffer *buffer, vec3 start, vec3 end, vec3 color);
@@ -136,8 +153,9 @@ void draw_line_buffer(struct LineBuffer *buffer, uint32 program);
 void clear_line_buffer(struct LineBuffer *buffer);
 #endif
 
-void draw_quad_buffered(struct RenderBuffer *render_buffer, vec2 position, vec2 size, vec4 uv, vec3 color);
+void draw_world_quad_buffered(struct RenderBuffer *render_buffer, vec2 position, vec2 size, vec4 uv, vec3 color);
 void draw_screen_quad_buffered(struct RenderBuffer *render_buffer, vec2 position, vec2 size, vec4 uv, vec3 color);
-void draw_quad_buffer(struct SpriteBatch *sprite_batch, struct RenderBuffer *render_buffer);
+void draw_world_quad_buffer(struct SpriteBatch *sprite_batch, struct RenderBuffer *render_buffer);
 void draw_screen_quad_buffer(struct SpriteBatch *sprite_batch, struct RenderBuffer *render_buffer);
-void clear_quad_buffer(struct QuadBuffer *buffer);
+
+void clear_render_buffer(struct RenderBuffer *buffer);
