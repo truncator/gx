@@ -444,6 +444,7 @@ void draw_text_buffer(struct SpriteBatch *sprite_batch, struct Font *font, struc
 {
     begin_sprite_batch(sprite_batch);
 
+    // TODO: centering option
     for (uint32 i = 0; i < buffer->current_size; ++i)
     {
         struct Text *text = &buffer->texts[i];

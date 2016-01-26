@@ -87,6 +87,12 @@ struct DistanceField
     uint16 values[32*32];
     uint32 width;
     uint32 height;
+
+    float cell_size;
+
+    // Named constants used when recalculating the distance field.
+    uint16 uninitialized_value;
+    uint16 occupied_value;
 };
 
 struct Building

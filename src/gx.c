@@ -333,6 +333,141 @@ static struct Building *create_building(struct GameState *game_state)
     return building;
 }
 
+static uint16 *get_distance_field_value(struct DistanceField *distance_field, vec2 position)
+{
+    float x = position.x + (distance_field->width/2.0f * distance_field->cell_size) - distance_field->cell_size/2.0f;
+    float y = position.y + (distance_field->height/2.0f * distance_field->cell_size) - distance_field->cell_size/2.0f;
+
+    struct AABB aabb = aabb_from_transform(vec2_zero(), vec2_mul(vec2_new(distance_field->width, distance_field->height), distance_field->cell_size));
+
+    uint32 xi = x / distance_field->cell_size;
+    uint32 yi = y / distance_field->cell_size;
+
+#if 0
+    fprintf(stderr, "%f %f -> %f %f\n", aabb.min.x, aabb.min.y, aabb.max.x, aabb.max.y);
+    fprintf(stderr, "%f %f -> %f %f -> %u %u\n", position.x, position.y, x, y, xi, yi);
+#endif
+
+#if 0
+    if ((x < aabb.min.x) || (y < aabb.min.y) || (x > aabb.max.x) || (y > aabb.max.y))
+    {
+        fprintf(stderr, "out of bounds: %f %f -> %u %u\n", x, y, xi, yi);
+        return NULL;
+    }
+#endif
+
+    if ((xi >= distance_field->width) || (yi >= distance_field->height))
+        return NULL;
+
+    uint16 *value = &distance_field->values[yi * distance_field->width + xi];
+    return value;
+}
+
+static void set_distance_field_value(struct DistanceField *distance_field, vec2 position, uint16 value)
+{
+    uint16 *original = get_distance_field_value(distance_field, position);
+    if (original == NULL)
+        return;
+
+    *original = value;
+}
+
+static vec2 calc_distance_field_gradient(struct DistanceField *distance_field, vec2 position)
+{
+    // NOTE: THIS IS COMPLETELY BROKEN AT THE MOMENT!
+    // TODO: FIX THIS MONSTROSITY
+
+    uint16 current_value = *get_distance_field_value(distance_field, position);
+
+    vec2 direction = vec2_zero();
+    uint16 min_value = current_value + 1;
+
+    for (int32 y = -1; y < 2; ++y)
+    {
+        for (int32 x = -1; x < 2; ++x)
+        {
+            if ((x == 0) && (y == 0))
+                continue;
+
+            vec2 neighbor_position = vec2_new(position.x + x, position.y + y);
+
+            uint16 *value = get_distance_field_value(distance_field, neighbor_position);
+            if (value == NULL)
+                continue;
+
+            if ((*value == distance_field->occupied_value) || (*value == distance_field->uninitialized_value))
+                continue;
+
+            if (*value < min_value)
+            {
+                min_value = *value;
+                direction = vec2_normalize(vec2_sub(neighbor_position, position));
+            }
+        }
+    }
+
+    return direction;
+}
+
+static void calc_distance_field(struct GameState *game_state, struct DistanceField *distance_field, vec2 origin)
+{
+    for (uint32 i = 0; i < ARRAY_SIZE(distance_field->values); ++i)
+        distance_field->values[i] = distance_field->uninitialized_value;
+
+    for (uint32 i = 0; i < game_state->building_count; ++i)
+    {
+        struct Building *building = &game_state->buildings[i];
+        struct AABB aabb = aabb_from_transform(building->position, building->size);
+
+        set_distance_field_value(distance_field, vec2_new(aabb.min.x, aabb.min.y), distance_field->occupied_value);
+        set_distance_field_value(distance_field, vec2_new(aabb.max.x, aabb.min.y), distance_field->occupied_value);
+        set_distance_field_value(distance_field, vec2_new(aabb.max.x, aabb.max.y), distance_field->occupied_value);
+        set_distance_field_value(distance_field, vec2_new(aabb.min.x, aabb.max.y), distance_field->occupied_value);
+    }
+
+    //
+    // Dijkstra's algorithm.
+    //
+
+    // TODO: heap alloc?
+    vec2 to_visit[64*64] = {0};
+    uint32 to_visit_count = 0;
+
+    // Set origin (target).
+    to_visit[to_visit_count++] = origin;
+    set_distance_field_value(distance_field, to_visit[0], 0);
+
+    for (uint32 i = 0; i < to_visit_count; ++i)
+    {
+        vec2 parent = to_visit[i];
+        uint16 *parent_value = get_distance_field_value(distance_field, parent);
+        ASSERT_NOT_NULL(parent_value);
+
+        vec2 neighbors[4];
+        neighbors[0] = vec2_new(parent.x,                             parent.y + distance_field->cell_size);
+        neighbors[1] = vec2_new(parent.x,                             parent.y - distance_field->cell_size);
+        neighbors[2] = vec2_new(parent.x - distance_field->cell_size, parent.y                            );
+        neighbors[3] = vec2_new(parent.x + distance_field->cell_size, parent.y                            );
+
+        for (uint32 j = 0; j < 4; ++j)
+        {
+            vec2 neighbor = neighbors[j];
+
+            uint16 *value = get_distance_field_value(distance_field, neighbor);
+            if (value == NULL)
+                continue;
+
+            if (*value == distance_field->uninitialized_value)
+            {
+                *value = *parent_value + 1;
+
+                ASSERT(to_visit_count < ARRAY_SIZE(to_visit));
+                to_visit[to_visit_count++] = neighbor;
+            }
+        }
+    }
+}
+
 void init_game(struct GameMemory *memory)
 {
     ASSERT(memory->game_memory_size >= sizeof(struct GameState));
@@ -361,6 +496,7 @@ void init_game(struct GameMemory *memory)
         ship->team = TEAM_ALLY;
     }
 
+#if 0
     for (uint32 i = 0; i < unit_count; ++i)
     {
         struct Ship *ship = create_ship(game_state);
@@ -376,26 +512,24 @@ void init_game(struct GameMemory *memory)
 
         ship->team = TEAM_ENEMY;
     }
+#endif
 
     for (uint32 i = 0; i < 32; ++i)
     {
         struct Building *building = create_building(game_state);
-        building->position = vec2_new(random_float(-16.0f, 16.0f), random_float(-16.0f, 16.0f));
+        building->position = vec2_new(random_int(-16, 16), random_int(-16, 16));
         building->size = vec2_new(2, 2);
     }
 
     uint32 distance_field_length = (uint32)sqrtf(ARRAY_SIZE(game_state->distance_field.values));
     game_state->distance_field.width = distance_field_length;
     game_state->distance_field.height = distance_field_length;
-    for (uint32 y = 0; y < game_state->distance_field.height; ++y)
-    {
-        for (uint32 x = 0; x < game_state->distance_field.width; ++x)
-        {
-            float xc = (float)x - game_state->distance_field.width/2.0f;
-            float yc = (float)y - game_state->distance_field.height/2.0f;
-            game_state->distance_field.values[y * game_state->distance_field.width + x] = (uint32)sqrtf(xc*xc + yc*yc);
-        }
-    }
+    game_state->distance_field.cell_size = 2.0f;
+
+    game_state->distance_field.uninitialized_value = UINT16_MAX;
+    game_state->distance_field.occupied_value      = UINT16_MAX - 1;
+
+    calc_distance_field(game_state, &game_state->distance_field, vec2_zero());
 }
 
 static void tick_combat(struct GameState *game_state, float dt)
@@ -615,6 +749,7 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
     clear_render_buffer(render_buffer);
 
     char buffer[16];
+    float max_distance = sqrtf(game_state->distance_field.width * game_state->distance_field.width + game_state->distance_field.height * game_state->distance_field.height);
     for (uint32 y = 0; y < game_state->distance_field.height; ++y)
     {
         for (uint32 x = 0; x < game_state->distance_field.width; ++x)
@@ -625,10 +760,19 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
             uint16 value = game_state->distance_field.values[y * game_state->distance_field.width + x];
             snprintf(buffer, sizeof(buffer), "%u", value);
 
-            vec2 position = vec2_sub(vec2_new(x, y), vec2_div(vec2_new(game_state->distance_field.width, game_state->distance_field.height), 2.0f));
+            //vec2 position = vec2_mul(vec2_sub(vec2_new(x, y), vec2_div(vec2_new(game_state->distance_field.width, game_state->distance_field.height), 2.0f)), game_state->distance_field.cell_size);
+            vec2 position = vec2_mul(vec2_new(x, y), game_state->distance_field.cell_size);
+            position = vec2_sub(position, vec2_mul(vec2_new(game_state->distance_field.width, game_state->distance_field.height), game_state->distance_field.cell_size/2.0f));
+            position = vec2_add(position, vec2_scalar(game_state->distance_field.cell_size));
+
             draw_world_text(buffer, position, vec3_new(1, 1, 1), &render_buffer->text, &game_state->camera, screen_width, screen_height);
+
+            vec3 color = vec3_new(value / max_distance, 0.0f, 0.0f);
+            draw_world_quad_buffered(render_buffer, position, vec2_scalar(game_state->distance_field.cell_size), vec4_zero(), color);
         }
     }
+
+    draw_world_quad_buffered(render_buffer, vec2_zero(), vec2_scalar(0.2f), vec4_zero(), vec3_new(1, 1, 0));
 
     if (mouse_down(MOUSE_LEFT, input))
     {
@@ -684,12 +828,17 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
 
     if (mouse_down(MOUSE_RIGHT, input))
     {
+        vec2 target_position = screen_to_world_coords(input->mouse_position, &game_state->camera, screen_width, screen_height);
+        // TODO: optimize this. should there be multiple distance fields,
+        // one per move order?
+        calc_distance_field(game_state, &game_state->distance_field, target_position);
+
         for (uint32 i = 0; i < game_state->selected_ship_count; ++i)
         {
             uint32 id = game_state->selected_ships[i];
             struct Ship *ship = get_ship_by_id(game_state, id);
 
-            ship->target_position = screen_to_world_coords(input->mouse_position, &game_state->camera, screen_width, screen_height);
+            ship->target_position = target_position;
             ship->move_order = true;
         }
     }
@@ -712,10 +861,19 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
         struct Ship *ship = &game_state->ships[i];
         if (ship->move_order)
         {
-            vec2 direction = vec2_normalize(vec2_sub(ship->target_position, ship->position));
+            vec2 direction = calc_distance_field_gradient(&game_state->distance_field, ship->position);
+            /*
+            if (vec2_length2(direction) < FLOAT_EPSILON)
+                direction = vec2_normalize(vec2_sub(ship->target_position, ship->position));
+                */
             ship->move_velocity = vec2_mul(direction, 2.0f);
 
-            if (vec2_distance2(ship->position, ship->target_position) < 0.1f)
+            /*
+            vec2 direction = vec2_normalize(vec2_sub(ship->target_position, ship->position));
+            ship->move_velocity = vec2_mul(direction, 2.0f);
+            */
+
+            if (vec2_distance2(ship->position, ship->target_position) < game_state->distance_field.cell_size/2.0f)
             {
                 ship->move_velocity = vec2_zero();
                 ship->move_order = false;
