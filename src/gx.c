@@ -452,58 +452,61 @@ static void tick_physics(struct GameState *game_state, float dt)
     }
 
     // Ship-ship collision.
-    for (uint32 i = 0; i < game_state->ship_count - 1; ++i)
+    if (game_state->ship_count >= 2)
     {
-        struct Ship *a = &game_state->ships[i];
-        struct AABB a_aabb = aabb_from_transform(a->position, a->size);
-        vec2 a_center = vec2_div(vec2_add(a_aabb.min, a_aabb.max), 2.0f);
-        vec2 a_half_extents = vec2_div(vec2_sub(a_aabb.max, a_aabb.min), 2.0f);
-
-        for (uint32 j = i + 1; j < game_state->ship_count; ++j)
+        for (uint32 i = 0; i < game_state->ship_count - 1; ++i)
         {
-            struct Ship *b = &game_state->ships[j];
-            struct AABB b_aabb = aabb_from_transform(b->position, b->size);
+            struct Ship *a = &game_state->ships[i];
+            struct AABB a_aabb = aabb_from_transform(a->position, a->size);
+            vec2 a_center = vec2_div(vec2_add(a_aabb.min, a_aabb.max), 2.0f);
+            vec2 a_half_extents = vec2_div(vec2_sub(a_aabb.max, a_aabb.min), 2.0f);
 
-            if (aabb_intersection(a_aabb, b_aabb))
+            for (uint32 j = i + 1; j < game_state->ship_count; ++j)
             {
-                vec2 b_center = vec2_div(vec2_add(b_aabb.min, b_aabb.max), 2.0f);
-                vec2 b_half_extents = vec2_div(vec2_sub(b_aabb.max, b_aabb.min), 2.0f);
+                struct Ship *b = &game_state->ships[j];
+                struct AABB b_aabb = aabb_from_transform(b->position, b->size);
 
-                vec2 intersection = vec2_sub(vec2_abs(vec2_sub(b_center, a_center)), vec2_add(a_half_extents, b_half_extents));
-                if (intersection.x > intersection.y)
+                if (aabb_intersection(a_aabb, b_aabb))
                 {
-                    if (abs_float(a->move_velocity.x) > abs_float(b->move_velocity.x))
-                        a->move_velocity.x = 0.0f;
-                    else
-                        b->move_velocity.x = 0.0f;
+                    vec2 b_center = vec2_div(vec2_add(b_aabb.min, b_aabb.max), 2.0f);
+                    vec2 b_half_extents = vec2_div(vec2_sub(b_aabb.max, b_aabb.min), 2.0f);
 
-                    if (a->position.x < b->position.x)
+                    vec2 intersection = vec2_sub(vec2_abs(vec2_sub(b_center, a_center)), vec2_add(a_half_extents, b_half_extents));
+                    if (intersection.x > intersection.y)
                     {
-                        a->position.x += intersection.x/2.0f;
-                        b->position.x -= intersection.x/2.0f;
-                    }
-                    else
-                    {
-                        a->position.x -= intersection.x/2.0f;
-                        b->position.x += intersection.x/2.0f;
-                    }
-                }
-                else
-                {
-                    if (abs_float(a->move_velocity.y) > abs_float(b->move_velocity.y))
-                        a->move_velocity.y = 0.0f;
-                    else
-                        b->move_velocity.y = 0.0f;
+                        if (abs_float(a->move_velocity.x) > abs_float(b->move_velocity.x))
+                            a->move_velocity.x = 0.0f;
+                        else
+                            b->move_velocity.x = 0.0f;
 
-                    if (a->position.y < b->position.y)
-                    {
-                        a->position.y += intersection.y/2.0f;
-                        b->position.y -= intersection.y/2.0f;
+                        if (a->position.x < b->position.x)
+                        {
+                            a->position.x += intersection.x/2.0f;
+                            b->position.x -= intersection.x/2.0f;
+                        }
+                        else
+                        {
+                            a->position.x -= intersection.x/2.0f;
+                            b->position.x += intersection.x/2.0f;
+                        }
                     }
                     else
                     {
-                        a->position.y -= intersection.y/2.0f;
-                        b->position.y += intersection.y/2.0f;
+                        if (abs_float(a->move_velocity.y) > abs_float(b->move_velocity.y))
+                            a->move_velocity.y = 0.0f;
+                        else
+                            b->move_velocity.y = 0.0f;
+
+                        if (a->position.y < b->position.y)
+                        {
+                            a->position.y += intersection.y/2.0f;
+                            b->position.y -= intersection.y/2.0f;
+                        }
+                        else
+                        {
+                            a->position.y -= intersection.y/2.0f;
+                            b->position.y += intersection.y/2.0f;
+                        }
                     }
                 }
             }
