@@ -162,6 +162,7 @@ int main(int argc, char *argv[])
     // cleanup
     //
 
+    free(game_memory.render_memory);
     free(game_memory.game_memory);
     clean_renderer(&renderer);
 
