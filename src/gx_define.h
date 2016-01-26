@@ -33,3 +33,6 @@ typedef uint64_t uint64;
 #define ASSERT_NOT_NULL(pointer) ASSERT(pointer != NULL)
 
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof(array[0]))
+
+#define KILOBYTES(n) ((n) * 1024)
+#define MEGABYTES(n) (KILOBYTES(n) * 1024)
