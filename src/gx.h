@@ -81,9 +81,19 @@ struct Projectile
     vec2 velocity;
 };
 
+struct DistanceField
+{
+    // TODO: decide whether this should be dynamically allocated or not
+    uint16 values[32*32];
+    uint32 width;
+    uint32 height;
+};
+
 struct GameState
 {
     struct Camera camera;
+
+    struct DistanceField distance_field;
 
 
     //

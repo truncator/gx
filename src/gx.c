@@ -297,6 +297,19 @@ void init_game(struct GameMemory *memory)
 
         ship->team = TEAM_ENEMY;
     }
+
+    uint32 distance_field_length = (uint32)sqrtf(ARRAY_SIZE(game_state->distance_field.values));
+    game_state->distance_field.width = distance_field_length;
+    game_state->distance_field.height = distance_field_length;
+    for (uint32 y = 0; y < game_state->distance_field.height; ++y)
+    {
+        for (uint32 x = 0; x < game_state->distance_field.width; ++x)
+        {
+            float xc = (float)x - game_state->distance_field.width/2.0f;
+            float yc = (float)y - game_state->distance_field.height/2.0f;
+            game_state->distance_field.values[y * game_state->distance_field.width + x] = (uint32)sqrtf(xc*xc + yc*yc);
+        }
+    }
 }
 
 static struct Ship *find_nearest_enemy(struct GameState *game_state, struct Ship *ship)
@@ -525,24 +538,28 @@ static struct AABB calc_mouse_selection_box(struct Input *input, uint32 mouse_bu
     return aabb;
 }
 
-static vec2 screen_to_world_coords(vec2 screen_coords, struct Camera *camera, uint32 screen_width, uint32 screen_height)
-{
-    float aspect_ratio = (float)screen_width / (float)screen_height;
-
-    vec2 world_coords;
-    world_coords.x = ((screen_coords.x / (float)screen_width) * 2.0f - 1.0f) * camera->zoom/2.0f;
-    world_coords.y = ((((float)screen_height - screen_coords.y) / (float)screen_height) * 2.0f - 1.0f) * camera->zoom/2.0f / aspect_ratio;
-    world_coords = vec2_add(world_coords, camera->position);
-    return world_coords;
-}
-
 void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_width, uint32 screen_height, float dt)
 {
     struct GameState *game_state = (struct GameState *)memory->game_memory;
     struct RenderBuffer *render_buffer = (struct RenderBuffer *)memory->render_memory;
 
-    clear_quad_buffer(&render_buffer->quads);
-    clear_quad_buffer(&render_buffer->screen_quads);
+    clear_render_buffer(render_buffer);
+
+    char buffer[16];
+    for (uint32 y = 0; y < game_state->distance_field.height; ++y)
+    {
+        for (uint32 x = 0; x < game_state->distance_field.width; ++x)
+        {
+            if (render_buffer->text.current_size >= ARRAY_SIZE(render_buffer->text.texts))
+                continue;
+
+            uint16 value = game_state->distance_field.values[y * game_state->distance_field.width + x];
+            snprintf(buffer, sizeof(buffer), "%u", value);
+
+            vec2 position = vec2_sub(vec2_new(x, y), vec2_div(vec2_new(game_state->distance_field.width, game_state->distance_field.height), 2.0f));
+            draw_world_text(buffer, position, vec3_new(1, 1, 1), &render_buffer->text, &game_state->camera, screen_width, screen_height);
+        }
+    }
 
     if (mouse_down(MOUSE_LEFT, input))
     {
@@ -614,10 +631,10 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
         uint32 id = game_state->selected_ships[i];
         struct Ship *ship = get_ship_by_id(game_state, id);
 
-        draw_quad_buffered(render_buffer, ship->position, vec2_mul(ship->size, 1.1f), vec4_zero(), vec3_new(0, 1, 0));
+        draw_world_quad_buffered(render_buffer, ship->position, vec2_mul(ship->size, 1.1f), vec4_zero(), vec3_new(0, 1, 0));
 
         if (ship->move_order)
-            draw_quad_buffered(render_buffer, ship->target_position, vec2_new(0.5f, 0.5f), vec4_zero(), vec3_new(0, 1, 0));
+            draw_world_quad_buffered(render_buffer, ship->target_position, vec2_new(0.5f, 0.5f), vec4_zero(), vec3_new(0, 1, 0));
     }
 
     // Handle move orders.
@@ -673,6 +690,20 @@ static void draw_projectiles(struct GameState *game_state, struct Renderer *rend
     bind_program(0);
 }
 
+static void draw_frame_text_buffer(struct Renderer *renderer, struct RenderBuffer *render_buffer)
+{
+    bind_program(renderer->text_program);
+
+    bind_texture_unit(0);
+    set_uniform_int32("u_Texture", renderer->text_program, 0);
+    bind_texture(renderer->debug_font.texture);
+
+    draw_text_buffer(&renderer->sprite_batch, &renderer->debug_font, &render_buffer->text);
+
+    bind_texture(0);
+    bind_program(0);
+}
+
 void render_game(struct GameMemory *memory, struct Renderer *renderer, uint32 screen_width, uint32 screen_height)
 {
     struct GameState *game_state = (struct GameState *)memory->game_memory;
@@ -691,7 +722,7 @@ void render_game(struct GameMemory *memory, struct Renderer *renderer, uint32 sc
     draw_projectiles(game_state, renderer);
 
     bind_program(renderer->quad_program);
-    draw_quad_buffer(&renderer->sprite_batch, render_buffer);
+    draw_world_quad_buffer(&renderer->sprite_batch, render_buffer);
     bind_program(0);
 
     view_projection_matrix = mat4_orthographic(0, screen_width, screen_height, 0, 0, 1);
@@ -700,4 +731,6 @@ void render_game(struct GameMemory *memory, struct Renderer *renderer, uint32 sc
     bind_program(renderer->quad_program);
     draw_screen_quad_buffer(&renderer->sprite_batch, render_buffer);
     bind_program(0);
+
+    draw_frame_text_buffer(renderer, render_buffer);
 }
