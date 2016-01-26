@@ -89,11 +89,25 @@ struct DistanceField
     uint32 height;
 };
 
+struct Building
+{
+    vec2 position;
+    vec2 size;
+};
+
 struct GameState
 {
     struct Camera camera;
 
+
+    //
+    // map
+    //
+
     struct DistanceField distance_field;
+
+    struct Building buildings[64];
+    uint32 building_count;
 
 
     //

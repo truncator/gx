@@ -254,64 +254,6 @@ static void damage_ship(struct GameState *game_state, struct Ship *ship, int32 d
         destroy_ship(game_state, ship);
 }
 
-void init_game(struct GameMemory *memory)
-{
-    ASSERT(memory->game_memory_size >= sizeof(struct GameState));
-    struct GameState *game_state = (struct GameState *)memory->game_memory;
-
-    struct Camera *camera = &game_state->camera;
-    camera->zoom = 20.0f;
-
-    game_state->ship_id_map = create_uint_hash_map();
-
-    uint32 unit_count = 5;
-    for (uint32 i = 0; i < unit_count; ++i)
-    {
-        struct Ship *ship = create_ship(game_state);
-
-        ship->size = vec2_new(1, 1);
-        ship->move_velocity = vec2_new(0, 0);
-
-        float xp = 2.0f * ((float)i - unit_count/2.0f);
-        float yp = -camera->zoom/4.0f;
-        ship->position = vec2_new(xp, yp);
-
-        ship->health = 5;
-        ship->fire_cooldown = 2.0f;
-
-        ship->team = TEAM_ALLY;
-    }
-
-    for (uint32 i = 0; i < unit_count; ++i)
-    {
-        struct Ship *ship = create_ship(game_state);
-        ship->size = vec2_new(1, 1);
-        ship->move_velocity = vec2_new(0, 0);
-
-        float xp = 2.0f * ((float)i - unit_count/2.0f);
-        float yp = camera->zoom/4.0f;
-        ship->position = vec2_new(xp, yp);
-
-        ship->health = 5;
-        ship->fire_cooldown = 2.0f;
-
-        ship->team = TEAM_ENEMY;
-    }
-
-    uint32 distance_field_length = (uint32)sqrtf(ARRAY_SIZE(game_state->distance_field.values));
-    game_state->distance_field.width = distance_field_length;
-    game_state->distance_field.height = distance_field_length;
-    for (uint32 y = 0; y < game_state->distance_field.height; ++y)
-    {
-        for (uint32 x = 0; x < game_state->distance_field.width; ++x)
-        {
-            float xc = (float)x - game_state->distance_field.width/2.0f;
-            float yc = (float)y - game_state->distance_field.height/2.0f;
-            game_state->distance_field.values[y * game_state->distance_field.width + x] = (uint32)sqrtf(xc*xc + yc*yc);
-        }
-    }
-}
-
 static struct Ship *find_nearest_enemy(struct GameState *game_state, struct Ship *ship)
 {
     struct Ship *nearest = NULL;
@@ -380,6 +322,82 @@ static void fire_projectile(struct GameState *game_state, struct Ship *source, s
     projectile->velocity = vec2_mul(direction, 5.0f);
 }
 
+static struct Building *create_building(struct GameState *game_state)
+{
+    ASSERT(game_state->building_count < ARRAY_SIZE(game_state->buildings));
+
+    uint32 array_index = game_state->building_count;
+    ++game_state->building_count;
+
+    struct Building *building = &game_state->buildings[array_index];
+    return building;
+}
+
+void init_game(struct GameMemory *memory)
+{
+    ASSERT(memory->game_memory_size >= sizeof(struct GameState));
+    struct GameState *game_state = (struct GameState *)memory->game_memory;
+
+    struct Camera *camera = &game_state->camera;
+    camera->zoom = 20.0f;
+
+    game_state->ship_id_map = create_uint_hash_map();
+
+    uint32 unit_count = 5;
+    for (uint32 i = 0; i < unit_count; ++i)
+    {
+        struct Ship *ship = create_ship(game_state);
+
+        ship->size = vec2_new(1, 1);
+        ship->move_velocity = vec2_new(0, 0);
+
+        float xp = 2.0f * ((float)i - unit_count/2.0f);
+        float yp = -camera->zoom/4.0f;
+        ship->position = vec2_new(xp, yp);
+
+        ship->health = 5;
+        ship->fire_cooldown = 2.0f;
+
+        ship->team = TEAM_ALLY;
+    }
+
+    for (uint32 i = 0; i < unit_count; ++i)
+    {
+        struct Ship *ship = create_ship(game_state);
+        ship->size = vec2_new(1, 1);
+        ship->move_velocity = vec2_new(0, 0);
+
+        float xp = 2.0f * ((float)i - unit_count/2.0f);
+        float yp = camera->zoom/4.0f;
+        ship->position = vec2_new(xp, yp);
+
+        ship->health = 5;
+        ship->fire_cooldown = 2.0f;
+
+        ship->team = TEAM_ENEMY;
+    }
+
+    for (uint32 i = 0; i < 32; ++i)
+    {
+        struct Building *building = create_building(game_state);
+        building->position = vec2_new(random_float(-16.0f, 16.0f), random_float(-16.0f, 16.0f));
+        building->size = vec2_new(2, 2);
+    }
+
+    uint32 distance_field_length = (uint32)sqrtf(ARRAY_SIZE(game_state->distance_field.values));
+    game_state->distance_field.width = distance_field_length;
+    game_state->distance_field.height = distance_field_length;
+    for (uint32 y = 0; y < game_state->distance_field.height; ++y)
+    {
+        for (uint32 x = 0; x < game_state->distance_field.width; ++x)
+        {
+            float xc = (float)x - game_state->distance_field.width/2.0f;
+            float yc = (float)y - game_state->distance_field.height/2.0f;
+            game_state->distance_field.values[y * game_state->distance_field.width + x] = (uint32)sqrtf(xc*xc + yc*yc);
+        }
+    }
+}
+
 static void tick_combat(struct GameState *game_state, float dt)
 {
     for (uint32 i = 0; i < game_state->ship_count; ++i)
@@ -430,15 +448,30 @@ static void tick_physics(struct GameState *game_state, float dt)
     // TODO: spatial hashing
     //
 
-    // Projectile-ship collision.
+    // Projectile collision.
     for (uint32 i = 0; i < game_state->projectile_count; ++i)
     {
         struct Projectile *projectile = &game_state->projectiles[i];
         struct AABB projectile_aabb = aabb_from_transform(projectile->position, projectile->size);
 
+        // Projectile-building collision.
+        for (uint32 j = 0; j < game_state->building_count; ++j)
+        {
+            struct Building *building = &game_state->buildings[j];
+            struct AABB building_aabb = aabb_from_transform(building->position, building->size);
+
+            if (aabb_intersection(projectile_aabb, building_aabb))
+            {
+                // TODO: damage building if not friendly
+                destroy_projectile(game_state, projectile);
+                break;
+            }
+        }
+
         // NOTE: owner may be dead and destroyed at this point, so checking for NULL might be required.
         struct Ship *owner = get_ship_by_id(game_state, projectile->owner);
 
+        // Projectile-ship collision.
         for (uint32 j = 0; j < game_state->ship_count; ++j)
         {
             struct Ship *ship = &game_state->ships[j];
@@ -460,11 +493,13 @@ static void tick_physics(struct GameState *game_state, float dt)
                     damage_ship(game_state, ship, projectile->damage);
 
                 destroy_projectile(game_state, projectile);
+                break;
             }
         }
     }
 
-    // Ship-ship collision.
+    // TODO: optimize
+    // Ship collision.
     if (game_state->ship_count >= 2)
     {
         for (uint32 i = 0; i < game_state->ship_count - 1; ++i)
@@ -474,6 +509,40 @@ static void tick_physics(struct GameState *game_state, float dt)
             vec2 a_center = vec2_div(vec2_add(a_aabb.min, a_aabb.max), 2.0f);
             vec2 a_half_extents = vec2_div(vec2_sub(a_aabb.max, a_aabb.min), 2.0f);
 
+            // Ship-building collision.
+            for (uint32 j = 0; j < game_state->building_count; ++j)
+            {
+                struct Building *building = &game_state->buildings[j];
+                struct AABB b_aabb = aabb_from_transform(building->position, building->size);
+
+                if (aabb_intersection(a_aabb, b_aabb))
+                {
+                    vec2 b_center = vec2_div(vec2_add(b_aabb.min, b_aabb.max), 2.0f);
+                    vec2 b_half_extents = vec2_div(vec2_sub(b_aabb.max, b_aabb.min), 2.0f);
+
+                    vec2 intersection = vec2_sub(vec2_abs(vec2_sub(b_center, a_center)), vec2_add(a_half_extents, b_half_extents));
+                    if (intersection.x > intersection.y)
+                    {
+                        a->move_velocity.x = 0.0f;
+
+                        if (a->position.x < building->position.x)
+                            a->position.x += intersection.x/2.0f;
+                        else
+                            a->position.x -= intersection.x/2.0f;
+                    }
+                    else
+                    {
+                        a->move_velocity.y = 0.0f;
+
+                        if (a->position.y < building->position.y)
+                            a->position.y += intersection.y/2.0f;
+                        else
+                            a->position.y -= intersection.y/2.0f;
+                    }
+                }
+            }
+
+            // Ship-ship collision.
             for (uint32 j = i + 1; j < game_state->ship_count; ++j)
             {
                 struct Ship *b = &game_state->ships[j];
@@ -660,6 +729,21 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
     tick_physics(game_state, dt);
 }
 
+static void draw_buildings(struct GameState *game_state, struct Renderer *renderer)
+{
+    bind_program(renderer->quad_program);
+    begin_sprite_batch(&renderer->sprite_batch);
+
+    for (uint32 i = 0; i < game_state->building_count; ++i)
+    {
+        struct Building *building = &game_state->buildings[i];
+        draw_quad(&renderer->sprite_batch, building->position, building->size, vec3_new(0.3f, 0.3f, 0.3f));
+    }
+
+    end_sprite_batch(&renderer->sprite_batch);
+    bind_program(0);
+}
+
 static void draw_ships(struct GameState *game_state, struct Renderer *renderer)
 {
     bind_program(renderer->quad_program);
@@ -718,12 +802,13 @@ void render_game(struct GameMemory *memory, struct Renderer *renderer, uint32 sc
 
     update_ubo(renderer->camera_ubo, sizeof(mat4), &view_projection_matrix);
 
-    draw_ships(game_state, renderer);
-    draw_projectiles(game_state, renderer);
-
     bind_program(renderer->quad_program);
     draw_world_quad_buffer(&renderer->sprite_batch, render_buffer);
     bind_program(0);
+
+    draw_buildings(game_state, renderer);
+    draw_ships(game_state, renderer);
+    draw_projectiles(game_state, renderer);
 
     view_projection_matrix = mat4_orthographic(0, screen_width, screen_height, 0, 0, 1);
     update_ubo(renderer->camera_ubo, sizeof(mat4), &view_projection_matrix);
