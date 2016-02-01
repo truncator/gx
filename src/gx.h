@@ -81,18 +81,13 @@ struct Projectile
     vec2 velocity;
 };
 
-struct DistanceField
+struct VisibilityGraph
 {
-    // TODO: decide whether this should be dynamically allocated or not
-    uint16 values[32*32];
-    uint32 width;
-    uint32 height;
+    vec2 vertices[4096];
+    uint32 vertex_count;
 
-    float cell_size;
-
-    // Named constants used when recalculating the distance field.
-    uint16 uninitialized_value;
-    uint16 occupied_value;
+    uint32 edges[4096][2];
+    uint32 edge_count;
 };
 
 struct Building
@@ -110,7 +105,7 @@ struct GameState
     // map
     //
 
-    struct DistanceField distance_field;
+    struct VisibilityGraph visibility_graph;
 
     struct Building buildings[64];
     uint32 building_count;

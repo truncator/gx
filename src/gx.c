@@ -90,7 +90,7 @@ static struct AABB aabb_from_transform(vec2 center, vec2 size)
     return aabb;
 }
 
-static bool aabb_intersection(struct AABB a, struct AABB b)
+static bool aabb_aabb_intersection(struct AABB a, struct AABB b)
 {
     if ((a.max.x > b.min.x) && (a.min.x < b.max.x))
     {
@@ -99,6 +99,62 @@ static bool aabb_intersection(struct AABB a, struct AABB b)
     }
 
     return false;
+}
+
+static bool line_line_intersection(vec2 a0, vec2 a1, vec2 b0, vec2 b1)
+{
+#if 1
+    vec2 v = vec2_sub(a0, a1);
+    vec2 normal = vec2_new(v.y, -v.x);
+
+    vec2 v0 = vec2_sub(b0, a0);
+    vec2 v1 = vec2_sub(b1, a0);
+
+    float proj0 = vec2_dot(v0, normal);
+    float proj1 = vec2_dot(v1, normal);
+
+    if ((proj0 == 0) || (proj1 == 0))
+        return true;
+
+    if ((proj0 > 0) && (proj1 < 0))
+        return true;
+    if ((proj0 < 0) && (proj1 > 0))
+        return true;
+
+    return false;
+#else
+    vec2 intersection = vec2_zero();
+
+    vec2 b = vec2_sub(a1, a0);
+    vec2 d = vec2_sub(b1, b0);
+    float b_dot_p_perp = (b.x * d.y) - (b.y * d.x);
+
+    if (b_dot_p_perp == 0)
+        return false;
+
+    vec2 c = vec2_sub(b0, a0);
+    float t = ((c.x * d.y) - (c.y * d.x)) / b_dot_p_perp;
+    if ((t < 0) || (t > 1))
+        return false;
+
+    float u = ((c.x * b.y) - (c.y * b.x)) / b_dot_p_perp;
+    if ((u < 0) || (u > 1))
+        return false;
+
+    // TODO: make this an output parameter
+    intersection = vec2_add(a0, vec2_mul(b, t));
+
+    return true;
+#endif
+}
+
+static bool line_aabb_intersection(struct AABB aabb, vec2 line_start, vec2 line_end)
+{
+    // TODO: optimize?
+    return (line_line_intersection(line_start, line_end, vec2_new(aabb.min.x, aabb.min.y), vec2_new(aabb.max.x, aabb.min.y)) ||
+            line_line_intersection(line_start, line_end, vec2_new(aabb.max.x, aabb.min.y), vec2_new(aabb.max.x, aabb.max.y)) ||
+            line_line_intersection(line_start, line_end, vec2_new(aabb.max.x, aabb.max.y), vec2_new(aabb.min.x, aabb.max.y)) ||
+            line_line_intersection(line_start, line_end, vec2_new(aabb.min.x, aabb.max.y), vec2_new(aabb.min.x, aabb.min.y)));
 }
 
 static void tick_camera(struct Input *input, struct Camera *camera, float dt)
@@ -333,139 +389,81 @@ static struct Building *create_building(struct GameState *game_state)
     return building;
 }
 
-static uint16 *get_distance_field_value(struct DistanceField *distance_field, vec2 position)
+static bool is_visible(struct GameState *game_state, vec2 start, vec2 end, float edge_padding)
 {
-    float x = position.x + (distance_field->width/2.0f * distance_field->cell_size) - distance_field->cell_size/2.0f;
-    float y = position.y + (distance_field->height/2.0f * distance_field->cell_size) - distance_field->cell_size/2.0f;
-
-    struct AABB aabb = aabb_from_transform(vec2_zero(), vec2_mul(vec2_new(distance_field->width, distance_field->height), distance_field->cell_size));
-
-    uint32 xi = x / distance_field->cell_size;
-    uint32 yi = y / distance_field->cell_size;
-
-#if 0
-    fprintf(stderr, "%f %f -> %f %f\n", aabb.min.x, aabb.min.y, aabb.max.x, aabb.max.y);
-    fprintf(stderr, "%f %f -> %f %f -> %u %u\n", position.x, position.y, x, y, xi, yi);
-#endif
-
-#if 0
-    if ((x < aabb.min.x) || (y < aabb.min.y) || (x > aabb.max.x) || (y > aabb.max.y))
+    for (uint32 i = 0; i < game_state->building_count; ++i)
     {
-        fprintf(stderr, "out of bounds: %f %f -> %u %u\n", x, y, xi, yi);
-        return NULL;
-    }
-#endif
+        struct Building *building = &game_state->buildings[i];
+        struct AABB aabb = aabb_from_transform(building->position, vec2_add(building->size, vec2_scalar(edge_padding)));
 
-    if ((xi >= distance_field->width) || (yi >= distance_field->height))
-        return NULL;
-
-    uint16 *value = &distance_field->values[yi * distance_field->width + xi];
-    return value;
-}
-
-static void set_distance_field_value(struct DistanceField *distance_field, vec2 position, uint16 value)
-{
-    uint16 *original = get_distance_field_value(distance_field, position);
-    if (original == NULL)
-        return;
-
-    *original = value;
-}
-
-static vec2 calc_distance_field_gradient(struct DistanceField *distance_field, vec2 position)
-{
-    // NOTE: THIS IS COMPLETELY BROKEN AT THE MOMENT!
-    // TODO: FIX THIS MONSTROSITY
-
-    uint16 current_value = *get_distance_field_value(distance_field, position);
-
-    vec2 direction = vec2_zero();
-    uint16 min_value = current_value + 1;
-
-    for (int32 y = -1; y < 2; ++y)
-    {
-        for (int32 x = -1; x < 2; ++x)
-        {
-            if ((x == 0) && (y == 0))
-                continue;
-
-            vec2 neighbor_position = vec2_new(position.x + x, position.y + y);
-
-            uint16 *value = get_distance_field_value(distance_field, neighbor_position);
-            if (value == NULL)
-                continue;
-
-            if ((*value == distance_field->occupied_value) || (*value == distance_field->uninitialized_value))
-                continue;
-
-            if (*value < min_value)
-            {
-                min_value = *value;
-                direction = vec2_normalize(vec2_sub(neighbor_position, position));
-            }
-        }
+        if (line_aabb_intersection(aabb, start, end))
+            return false;
     }
 
-    return direction;
+    return true;
 }
 
-static void calc_distance_field(struct GameState *game_state, struct DistanceField *distance_field, vec2 origin)
+static void calc_visibility_graph(struct GameState *game_state, struct VisibilityGraph *graph)
 {
-    for (uint32 i = 0; i < ARRAY_SIZE(distance_field->values); ++i)
-        distance_field->values[i] = distance_field->uninitialized_value;
+    graph->vertex_count = 0;
+    graph->edge_count = 0;
 
+    const uint32 resolution = 4;
+    const float world_size = 64.0f;
+
+    // Add border vertices.
+    for (uint32 x = 0; x < resolution; ++x)
+    {
+        float xp = world_size * ((float)x / (float)(resolution - 1) - 0.5f);
+
+        ASSERT(graph->vertex_count + 1 < ARRAY_SIZE(graph->vertices));
+        graph->vertices[graph->vertex_count++] = vec2_new(xp, -world_size/2.0f);
+        graph->vertices[graph->vertex_count++] = vec2_new(xp,  world_size/2.0f);
+    }
+    for (uint32 y = 0; y < resolution; ++y)
+    {
+        float yp = world_size * ((float)y / (float)(resolution - 1) - 0.5f);
+
+        ASSERT(graph->vertex_count + 1 < ARRAY_SIZE(graph->vertices));
+        graph->vertices[graph->vertex_count++] = vec2_new(-world_size/2.0f, yp);
+        graph->vertices[graph->vertex_count++] = vec2_new( world_size/2.0f, yp);
+    }
+
+    // Add building vertices.
+    const float edge_padding = 0.5f;
     for (uint32 i = 0; i < game_state->building_count; ++i)
     {
         struct Building *building = &game_state->buildings[i];
         struct AABB aabb = aabb_from_transform(building->position, building->size);
 
-        set_distance_field_value(distance_field, vec2_new(aabb.min.x, aabb.min.y), distance_field->occupied_value);
-        set_distance_field_value(distance_field, vec2_new(aabb.max.x, aabb.min.y), distance_field->occupied_value);
-        set_distance_field_value(distance_field, vec2_new(aabb.max.x, aabb.max.y), distance_field->occupied_value);
-        set_distance_field_value(distance_field, vec2_new(aabb.min.x, aabb.max.y), distance_field->occupied_value);
+        ASSERT(graph->vertex_count + 3 < ARRAY_SIZE(graph->vertices));
+        graph->vertices[graph->vertex_count++] = vec2_new(aabb.min.x - edge_padding/2.0f, aabb.min.y - edge_padding/2.0f);
+        graph->vertices[graph->vertex_count++] = vec2_new(aabb.max.x + edge_padding/2.0f, aabb.min.y - edge_padding/2.0f);
+        graph->vertices[graph->vertex_count++] = vec2_new(aabb.max.x + edge_padding/2.0f, aabb.max.y + edge_padding/2.0f);
+        graph->vertices[graph->vertex_count++] = vec2_new(aabb.min.x - edge_padding/2.0f, aabb.max.y + edge_padding/2.0f);
     }
 
-    //
-    // Dijkstra's algorithm.
-    //
-
-    // TODO: heap alloc?
-    vec2 to_visit[64*64] = {0};
-    uint32 to_visit_count = 0;
-
-    // Set origin (target).
-    to_visit[to_visit_count++] = origin;
-    set_distance_field_value(distance_field, to_visit[0], 0);
-
-    for (uint32 i = 0; i < to_visit_count; ++i)
+    for (uint32 i = 0; i < graph->vertex_count - 1; ++i)
     {
-        vec2 parent = to_visit[i];
-        uint16 *parent_value = get_distance_field_value(distance_field, parent);
-        ASSERT_NOT_NULL(parent_value);
-
-        vec2 neighbors[4];
-        neighbors[0] = vec2_new(parent.x,                             parent.y + distance_field->cell_size);
-        neighbors[1] = vec2_new(parent.x,                             parent.y - distance_field->cell_size);
-        neighbors[2] = vec2_new(parent.x - distance_field->cell_size, parent.y                            );
-        neighbors[3] = vec2_new(parent.x + distance_field->cell_size, parent.y                            );
-
-        for (uint32 j = 0; j < 4; ++j)
+        for (uint32 j = i + 1; j < graph->vertex_count; ++j)
         {
-            vec2 neighbor = neighbors[j];
+            ASSERT(i < ARRAY_SIZE(graph->vertices));
+            ASSERT(j < ARRAY_SIZE(graph->vertices));
 
-            uint16 *value = get_distance_field_value(distance_field, neighbor);
-            if (value == NULL)
-                continue;
+            vec2 v0 = graph->vertices[i];
+            vec2 v1 = graph->vertices[j];
 
-            if (*value == distance_field->uninitialized_value)
+            if (is_visible(game_state, v0, v1, edge_padding))
             {
-                *value = *parent_value + 1;
-
-                ASSERT(to_visit_count < ARRAY_SIZE(to_visit));
-                to_visit[to_visit_count++] = neighbor;
+                ASSERT(graph->edge_count < ARRAY_SIZE(graph->edges));
+                uint32 *edge = &graph->edges[graph->edge_count++][0];
+                edge[0] = i;
+                edge[1] = j;
             }
         }
     }
+
+    fprintf(stderr, "generated visibility graph containing %u verts, %u edges\n", graph->vertex_count, graph->edge_count);
 }
 
 void init_game(struct GameMemory *memory)
@@ -514,22 +512,14 @@ void init_game(struct GameMemory *memory)
     }
 #endif
 
-    for (uint32 i = 0; i < 32; ++i)
+    for (uint32 i = 0; i < 4; ++i)
     {
         struct Building *building = create_building(game_state);
         building->position = vec2_new(random_int(-16, 16), random_int(-16, 16));
         building->size = vec2_new(2, 2);
     }
 
-    uint32 distance_field_length = (uint32)sqrtf(ARRAY_SIZE(game_state->distance_field.values));
-    game_state->distance_field.width = distance_field_length;
-    game_state->distance_field.height = distance_field_length;
-    game_state->distance_field.cell_size = 2.0f;
-
-    game_state->distance_field.uninitialized_value = UINT16_MAX;
-    game_state->distance_field.occupied_value      = UINT16_MAX - 1;
-
-    calc_distance_field(game_state, &game_state->distance_field, vec2_zero());
+    calc_visibility_graph(game_state, &game_state->visibility_graph);
 }
 
 static void tick_combat(struct GameState *game_state, float dt)
@@ -594,7 +584,7 @@ static void tick_physics(struct GameState *game_state, float dt)
             struct Building *building = &game_state->buildings[j];
             struct AABB building_aabb = aabb_from_transform(building->position, building->size);
 
-            if (aabb_intersection(projectile_aabb, building_aabb))
+            if (aabb_aabb_intersection(projectile_aabb, building_aabb))
             {
                 // TODO: damage building if not friendly
                 destroy_projectile(game_state, projectile);
@@ -620,7 +610,7 @@ static void tick_physics(struct GameState *game_state, float dt)
 
             struct AABB ship_aabb = aabb_from_transform(ship->position, ship->size);
 
-            if (aabb_intersection(projectile_aabb, ship_aabb))
+            if (aabb_aabb_intersection(projectile_aabb, ship_aabb))
             {
                 // Disable friendly fire.
                 if (ship->team != projectile->team)
@@ -649,7 +639,7 @@ static void tick_physics(struct GameState *game_state, float dt)
                 struct Building *building = &game_state->buildings[j];
                 struct AABB b_aabb = aabb_from_transform(building->position, building->size);
 
-                if (aabb_intersection(a_aabb, b_aabb))
+                if (aabb_aabb_intersection(a_aabb, b_aabb))
                 {
                     vec2 b_center = vec2_div(vec2_add(b_aabb.min, b_aabb.max), 2.0f);
                     vec2 b_half_extents = vec2_div(vec2_sub(b_aabb.max, b_aabb.min), 2.0f);
@@ -682,7 +672,7 @@ static void tick_physics(struct GameState *game_state, float dt)
                 struct Ship *b = &game_state->ships[j];
                 struct AABB b_aabb = aabb_from_transform(b->position, b->size);
 
-                if (aabb_intersection(a_aabb, b_aabb))
+                if (aabb_aabb_intersection(a_aabb, b_aabb))
                 {
                     vec2 b_center = vec2_div(vec2_add(b_aabb.min, b_aabb.max), 2.0f);
                     vec2 b_half_extents = vec2_div(vec2_sub(b_aabb.max, b_aabb.min), 2.0f);
@@ -748,31 +738,21 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
 
     clear_render_buffer(render_buffer);
 
-    char buffer[16];
-    float max_distance = sqrtf(game_state->distance_field.width * game_state->distance_field.width + game_state->distance_field.height * game_state->distance_field.height);
-    for (uint32 y = 0; y < game_state->distance_field.height; ++y)
+    for (uint32 i = 0; i < game_state->visibility_graph.vertex_count; ++i)
     {
-        for (uint32 x = 0; x < game_state->distance_field.width; ++x)
-        {
-            if (render_buffer->text.current_size >= ARRAY_SIZE(render_buffer->text.texts))
-                continue;
-
-            uint16 value = game_state->distance_field.values[y * game_state->distance_field.width + x];
-            snprintf(buffer, sizeof(buffer), "%u", value);
-
-            //vec2 position = vec2_mul(vec2_sub(vec2_new(x, y), vec2_div(vec2_new(game_state->distance_field.width, game_state->distance_field.height), 2.0f)), game_state->distance_field.cell_size);
-            vec2 position = vec2_mul(vec2_new(x, y), game_state->distance_field.cell_size);
-            position = vec2_sub(position, vec2_mul(vec2_new(game_state->distance_field.width, game_state->distance_field.height), game_state->distance_field.cell_size/2.0f));
-            position = vec2_add(position, vec2_scalar(game_state->distance_field.cell_size));
-
-            draw_world_text(buffer, position, vec3_new(1, 1, 1), &render_buffer->text, &game_state->camera, screen_width, screen_height);
-
-            vec3 color = vec3_new(value / max_distance, 0.0f, 0.0f);
-            draw_world_quad_buffered(render_buffer, position, vec2_scalar(game_state->distance_field.cell_size), vec4_zero(), color);
-        }
+        vec2 vertex = game_state->visibility_graph.vertices[i];
+        draw_world_quad_buffered(render_buffer, vertex, vec2_scalar(0.1f), vec4_zero(), vec3_new(0, 1, 1));
     }
 
-    draw_world_quad_buffered(render_buffer, vec2_zero(), vec2_scalar(0.2f), vec4_zero(), vec3_new(1, 1, 0));
+    for (uint32 i = 0; i < game_state->visibility_graph.edge_count; ++i)
+    {
+        uint32 *edge = &game_state->visibility_graph.edges[i][0];
+
+        vec2 p0 = game_state->visibility_graph.vertices[edge[0]];
+        vec2 p1 = game_state->visibility_graph.vertices[edge[1]];
+
+        draw_world_line_buffered(render_buffer, p0, p1, vec3_new(1, 1, 0));
+    }
 
     if (mouse_down(MOUSE_LEFT, input))
     {
@@ -818,7 +798,7 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
 
             vec2 center = vec2_div(vec2_add(ship_aabb.min, ship_aabb.max), 2.0f);
 
-            if (aabb_intersection(world_selection_box, ship_aabb))
+            if (aabb_aabb_intersection(world_selection_box, ship_aabb))
                 game_state->selected_ships[game_state->selected_ship_count++] = ship->id;
         }
 
@@ -829,9 +809,6 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
     if (mouse_down(MOUSE_RIGHT, input))
     {
         vec2 target_position = screen_to_world_coords(input->mouse_position, &game_state->camera, screen_width, screen_height);
-        // TODO: optimize this. should there be multiple distance fields,
-        // one per move order?
-        calc_distance_field(game_state, &game_state->distance_field, target_position);
 
         for (uint32 i = 0; i < game_state->selected_ship_count; ++i)
         {
@@ -861,7 +838,7 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
         struct Ship *ship = &game_state->ships[i];
         if (ship->move_order)
         {
-            vec2 direction = calc_distance_field_gradient(&game_state->distance_field, ship->position);
+            vec2 direction = vec2_zero();
             /*
             if (vec2_length2(direction) < FLOAT_EPSILON)
                 direction = vec2_normalize(vec2_sub(ship->target_position, ship->position));
@@ -873,7 +850,7 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
             ship->move_velocity = vec2_mul(direction, 2.0f);
             */
 
-            if (vec2_distance2(ship->position, ship->target_position) < game_state->distance_field.cell_size/2.0f)
+            if (vec2_distance2(ship->position, ship->target_position) < 0.1f)
             {
                 ship->move_velocity = vec2_zero();
                 ship->move_order = false;
