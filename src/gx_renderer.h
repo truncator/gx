@@ -52,8 +52,8 @@ struct TextBuffer
 
 struct Line
 {
-    vec3 start;
-    vec3 end;
+    vec2 start;
+    vec2 end;
     vec3 color;
 };
 
@@ -84,8 +84,11 @@ enum UniformBuffer
 
 struct RenderBuffer
 {
+    struct LineBuffer world_lines;
+
     struct QuadBuffer world_quads;
     struct QuadBuffer screen_quads;
+
     struct TextBuffer text;
 };
 
@@ -93,6 +96,7 @@ struct Renderer
 {
     struct SpriteBatch sprite_batch;
 
+    uint32 line_program;
     uint32 quad_program;
     uint32 text_program;
 
@@ -123,6 +127,7 @@ void bind_program(uint32 program);
 void set_uniform_int32(const char *name, uint32 program, int32 value);
 void set_uniform_uint32(const char *name, uint32 program, uint32 value);
 void set_uniform_float(const char *name, uint32 program, float value);
+void set_uniform_vec2(const char *name, uint32 program, vec2 value);
 void set_uniform_vec3(const char *name, uint32 program, vec3 value);
 void set_uniform_mat4(const char *name, uint32 program, mat4 value);
 
@@ -147,11 +152,8 @@ void draw_world_text(const char *string, vec2 position, vec3 color, struct TextB
 void draw_text_buffer(struct SpriteBatch *sprite_batch, struct Font *font, struct TextBuffer *text_buffer);
 void clear_text_buffer(struct TextBuffer *buffer);
 
-#if 0
-void draw_line(struct LineBuffer *buffer, vec3 start, vec3 end, vec3 color);
-void draw_line_buffer(struct LineBuffer *buffer, uint32 program);
-void clear_line_buffer(struct LineBuffer *buffer);
-#endif
+void draw_world_line_buffered(struct RenderBuffer *render_buffer, vec2 start, vec2 end, vec3 color);
+void draw_world_line_buffer(struct Renderer *renderer, struct RenderBuffer *render_buffer, uint32 program);
 
 void draw_world_quad_buffered(struct RenderBuffer *render_buffer, vec2 position, vec2 size, vec4 uv, vec3 color);
 void draw_screen_quad_buffered(struct RenderBuffer *render_buffer, vec2 position, vec2 size, vec4 uv, vec3 color);

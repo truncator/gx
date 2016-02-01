@@ -59,6 +59,7 @@ struct Renderer init_renderer(void)
 {
     // TODO: manual depth sorting
     glDisable(GL_DEPTH_TEST);
+
     glEnable(GL_CULL_FACE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -76,6 +77,7 @@ struct Renderer init_renderer(void)
 
     renderer.debug_font = load_font("ProggyClean");
 
+    renderer.line_program = load_program("line");
     renderer.quad_program = load_program("quad");
     renderer.text_program = load_program("text");
 
@@ -183,6 +185,12 @@ void set_uniform_float(const char *name, uint32 program, float value)
 {
     int32 location = glGetUniformLocation(program, name);
     glUniform1f(location, value);
+}
+
+void set_uniform_vec2(const char *name, uint32 program, vec2 value)
+{
+    int32 location = glGetUniformLocation(program, name);
+    glUniform2f(location, value.x, value.y);
 }
 
 void set_uniform_vec3(const char *name, uint32 program, vec3 value)
@@ -482,9 +490,10 @@ void clear_text_buffer(struct TextBuffer *buffer)
     buffer->cursor = vec2_new(2, 2);
 }
 
-#if 0
-void draw_line(struct LineBuffer *buffer, vec3 start, vec3 end, vec3 color)
+void draw_world_line_buffered(struct RenderBuffer *render_buffer, vec2 start, vec2 end, vec3 color)
 {
+    struct LineBuffer *buffer = &render_buffer->world_lines;
+
     ASSERT(buffer->current_size < ARRAY_SIZE(buffer->lines));
     struct Line *line = &buffer->lines[buffer->current_size++];
 
@@ -493,27 +502,31 @@ void draw_line(struct LineBuffer *buffer, vec3 start, vec3 end, vec3 color)
     line->color = color;
 }
 
-void draw_line_buffer(struct LineBuffer *buffer, uint32 program)
+void draw_world_line_buffer(struct Renderer *renderer, struct RenderBuffer *render_buffer, uint32 program)
 {
-    glBindVertexArray(global_blank_vao);
+    glBindVertexArray(renderer->blank_vao);
+
+    struct LineBuffer *buffer = &render_buffer->world_lines;
+
+    // TODO: line VBO, one draw call
     for (uint32 i = 0; i < buffer->current_size; ++i)
     {
         struct Line *line = &buffer->lines[i];
 
-        set_uniform_vec3("u_Start", program, line->start);
-        set_uniform_vec3("u_End", program, line->end);
+        set_uniform_vec2("u_Start", program, line->start);
+        set_uniform_vec2("u_End", program, line->end);
         set_uniform_vec3("u_Color", program, line->color);
 
         glDrawArrays(GL_LINES, 0, 2);
     }
+
     glBindVertexArray(0);
 }
 
-void clear_line_buffer(struct LineBuffer *buffer)
+static void clear_line_buffer(struct LineBuffer *buffer)
 {
     buffer->current_size = 0;
 }
-#endif
 
 void draw_world_quad_buffered(struct RenderBuffer *render_buffer, vec2 position, vec2 size, vec4 uv, vec3 color)
 {
@@ -576,7 +589,10 @@ static void clear_quad_buffer(struct QuadBuffer *buffer)
 
 void clear_render_buffer(struct RenderBuffer *buffer)
 {
-    clear_text_buffer(&buffer->text);
+    clear_line_buffer(&buffer->world_lines);
+
     clear_quad_buffer(&buffer->world_quads);
     clear_quad_buffer(&buffer->screen_quads);
+
+    clear_text_buffer(&buffer->text);
 }

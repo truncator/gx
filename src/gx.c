@@ -960,6 +960,10 @@ void render_game(struct GameMemory *memory, struct Renderer *renderer, uint32 sc
 
     update_ubo(renderer->camera_ubo, sizeof(mat4), &view_projection_matrix);
 
+    bind_program(renderer->line_program);
+    draw_world_line_buffer(renderer, render_buffer, renderer->line_program);
+    bind_program(0);
+
     bind_program(renderer->quad_program);
     draw_world_quad_buffer(&renderer->sprite_batch, render_buffer);
     bind_program(0);
