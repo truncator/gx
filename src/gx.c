@@ -104,6 +104,7 @@ static bool aabb_aabb_intersection(struct AABB a, struct AABB b)
 static bool line_line_intersection(vec2 a0, vec2 a1, vec2 b0, vec2 b1)
 {
 #if 1
+    // Implemented based on http://stackoverflow.com/a/17198094/4354008
     vec2 v = vec2_sub(a0, a1);
     vec2 normal = vec2_new(v.y, -v.x);
 
@@ -116,6 +117,7 @@ static bool line_line_intersection(vec2 a0, vec2 a1, vec2 b0, vec2 b1)
     if ((proj0 == 0) || (proj1 == 0))
         return true;
 
+    // TODO: float_sign()
     if ((proj0 > 0) && (proj1 < 0))
         return true;
     if ((proj0 < 0) && (proj1 > 0))
