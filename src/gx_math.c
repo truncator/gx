@@ -6,6 +6,8 @@
 #define STB_PERLIN_IMPLEMENTATION
 #include <stb/stb_perlin.h>
 
+// TODO: OPTIMIZE ALL OF THIS!
+
 struct Random
 {
     uint32 x, y, z, w;
@@ -290,6 +292,11 @@ vec2 vec2_abs(vec2 v)
     result.x = abs_float(v.x);
     result.y = abs_float(v.y);
     return result;
+}
+
+float vec2_dot(vec2 a, vec2 b)
+{
+    return (a.x * b.x) + (a.y * b.y);
 }
 
 float vec2_length(vec2 v)
