@@ -42,10 +42,28 @@ enum ShipTeam
     TEAM_ENEMY,
 };
 
+enum UnitFlags
+{
+    UNIT_MOVE_ORDER = 0x01,
+};
+
+struct Path
+{
+    // TODO: optimize space?
+    struct VisibilityNode *nodes[32];
+    uint32 node_count;
+    uint32 current_node_index;
+
+    vec2 start;
+    vec2 end;
+};
+
 struct Ship
 {
     uint32 id;
     uint8 team;
+
+    uint32 flags;
 
     vec2 position;
     float rotation;
@@ -54,14 +72,13 @@ struct Ship
     vec2 move_velocity;
     float rotation_velocity;
 
-    bool move_order;
-    vec2 target_position;
-
     int32 health;
 
     // TODO: expand on this
     float fire_cooldown;
     float fire_cooldown_timer;
+
+    struct Path path;
 };
 
 struct AABB
@@ -81,13 +98,23 @@ struct Projectile
     vec2 velocity;
 };
 
+struct WorkingPathNode
+{
+    struct VisibilityNode *node;
+    struct WorkingPathNode *parent;
+
+    float f_cost;
+    float g_cost;
+    float h_cost;
+};
+
 struct VisibilityNode
 {
-    uint32 index;
+    uint32 vertex_index;
 
     // TODO: linked list if memory becomes an issue?
-    uint32 edges[32];
-    uint32 edge_count;
+    uint32 neighbor_indices[64];
+    uint32 neighbor_index_count;
 };
 
 struct VisibilityGraph

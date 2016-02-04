@@ -169,13 +169,13 @@ static void tick_camera(struct Input *input, struct Camera *camera, float dt)
     vec2 camera_right = vec2_direction(camera->rotation - PI_OVER_TWO);
 
     vec2 move_acceleration = vec2_zero();
-    if (key_down(GLFW_KEY_W, input))
+    if (key_down(KEY_W, input))
         move_acceleration = vec2_add(move_acceleration, camera_up);
-    if (key_down(GLFW_KEY_A, input))
+    if (key_down(KEY_A, input))
         move_acceleration = vec2_add(move_acceleration, vec2_negate(camera_right));
-    if (key_down(GLFW_KEY_S, input))
+    if (key_down(KEY_S, input))
         move_acceleration = vec2_add(move_acceleration, vec2_negate(camera_up));
-    if (key_down(GLFW_KEY_D, input))
+    if (key_down(KEY_D, input))
         move_acceleration = vec2_add(move_acceleration, camera_right);
 
     if (vec2_length2(move_acceleration) > FLOAT_EPSILON)
@@ -212,9 +212,9 @@ static void tick_camera(struct Input *input, struct Camera *camera, float dt)
     //
 
     float zoom_acceleration = 0.0f;
-    if (key_down(GLFW_KEY_SPACE, input))
+    if (key_down(KEY_SPACE, input))
         zoom_acceleration += 1.0f;
-    if (key_down(GLFW_KEY_LEFT_CONTROL, input))
+    if (key_down(KEY_LEFT_CONTROL, input))
         zoom_acceleration -= 1.0f;
     zoom_acceleration *= camera->zoom * 50.0f;
 
@@ -445,53 +445,266 @@ static void calc_visibility_graph(struct GameState *game_state, struct Visibilit
         graph->vertices[graph->vertex_count++] = vec2_new(aabb.min.x - edge_padding/2.0f, aabb.max.y + edge_padding/2.0f);
     }
 
-    for (uint32 i = 0; i < graph->vertex_count - 1; ++i)
+    ASSERT(graph->vertex_count > 1);
+
+    // Generate adjacency lists for each vertex.
+    for (uint32 i = 0; i < graph->vertex_count; ++i)
     {
+        ASSERT(graph->node_count < ARRAY_SIZE(graph->nodes));
         struct VisibilityNode *n0 = &graph->nodes[graph->node_count++];
-        n0->index = i;
 
-        for (uint32 j = i + 1; j < graph->vertex_count; ++j)
+        vec2 v0 = graph->vertices[i];
+        n0->vertex_index = i;
+
+        for (uint32 j = 0; j < graph->vertex_count; ++j)
         {
-            ASSERT(i < ARRAY_SIZE(graph->vertices));
-            ASSERT(j < ARRAY_SIZE(graph->vertices));
+            if (i == j)
+                continue;
 
-            vec2 v0 = graph->vertices[i];
             vec2 v1 = graph->vertices[j];
-
-            if (is_visible(game_state, v0, v1, edge_padding))
+            if (is_visible(game_state, v0, v1, 0.0f))
             {
-                struct VisibilityNode *n1 = &graph->nodes[graph->node_count++];
-                n1->index = j;
-
-                n0->edges[n0->edge_count++] = n1->index;
-                n1->edges[n1->edge_count++] = n0->index;
+                ASSERT(n0->neighbor_index_count < ARRAY_SIZE(n0->neighbor_indices));
+                n0->neighbor_indices[n0->neighbor_index_count++] = j;
             }
         }
     }
 
-#if 0
-    for (uint32 i = 0; i < graph->vertex_count - 1; ++i)
+    fprintf(stderr, "Generated visibility graph containing %u verts, %u nodes.\n", graph->vertex_count, graph->node_count);
+}
+
+static bool is_node_in_list(struct WorkingPathNode *list, uint32 list_size, struct VisibilityNode *node, struct WorkingPathNode **match)
+{
+    for (uint32 i = 0; i < list_size; ++i)
     {
-        for (uint32 j = i + 1; j < graph->vertex_count; ++j)
+        if (list[i].node == node)
         {
-            ASSERT(i < ARRAY_SIZE(graph->vertices));
-            ASSERT(j < ARRAY_SIZE(graph->vertices));
+            *match = &list[i];
+            return true;
+        }
+    }
 
-            vec2 v0 = graph->vertices[i];
-            vec2 v1 = graph->vertices[j];
+    return false;
+}
 
-            if (is_visible(game_state, v0, v1, edge_padding))
+static float calc_g_cost(vec2 start, vec2 end)
+{
+    return vec2_distance(start, end);
+}
+
+static float calc_h_cost(vec2 start, vec2 end)
+{
+    // Simple euclidean distance.
+    // TODO: test better alternatives?
+    return vec2_distance(start, end);
+}
+
+static struct Path find_path(struct VisibilityGraph *graph, vec2 start, vec2 end)
+{
+    float min_start_distance = FLOAT_MAX;
+    float min_end_distance = FLOAT_MAX;
+    struct VisibilityNode *starting_visibility_node = NULL;
+    struct VisibilityNode *ending_visibility_node = NULL;
+
+    // TODO: optimize this O(n) search if needed.
+    // Find the node closest to the starting/ending positions
+    // ('start', 'end' parameters).
+    for (uint32 i = 0; i < graph->node_count; ++i)
+    {
+        struct VisibilityNode *candidate_node = &graph->nodes[i];
+        vec2 candidate_position = graph->vertices[candidate_node->vertex_index];
+
+        // Test for a closer 'start' node.
+        float start_distance = vec2_distance2(start, candidate_position);
+        if (start_distance < min_start_distance)
+        {
+            min_start_distance = start_distance;
+            starting_visibility_node = candidate_node;
+        }
+
+        // Test for a closer 'end' node.
+        float end_distance = vec2_distance2(end, candidate_position);
+        if (end_distance < min_end_distance)
+        {
+            min_end_distance = end_distance;
+            ending_visibility_node = candidate_node;
+        }
+    }
+
+    ASSERT_NOT_NULL(starting_visibility_node);
+    ASSERT_NOT_NULL(ending_visibility_node);
+
+    if (starting_visibility_node == ending_visibility_node)
+    {
+        //fprintf(stderr, "empty path, exiting early\n");
+        struct Path empty_path = {0};
+        empty_path.start = start;
+        empty_path.end = end;
+        return empty_path;
+    }
+
+    //fprintf(stderr, "finding path from (%f, %f) to (%f, %f)\n", start.x, start.y, end.x, end.y);
+    //fprintf(stderr, "searching %u nodes...\n", graph->node_count);
+    //fprintf(stderr, "found starting node: %u neighbors, distance %f, index %u\n", starting_visibility_node->neighbor_index_count, min_start_distance, si);
+    //fprintf(stderr, "found ending node: %u neighbors, distance %f, index %u\n", ending_visibility_node->neighbor_index_count, min_end_distance, ei);
+
+    // TODO: optimize this size
+    // Set up the temporary working node lists.
+    struct WorkingPathNode open_nodes[64];
+    struct WorkingPathNode closed_nodes[64];
+    uint32 open_node_count = 0;
+    uint32 closed_node_count = 0;
+
+    // Add the starting node to the open node list.
+    struct WorkingPathNode starting_node = {0};
+    starting_node.node = starting_visibility_node;
+    starting_node.parent = NULL;
+    open_nodes[open_node_count++] = starting_node;
+    
+    // Variable that will eventually point to the actual ending node.
+    struct WorkingPathNode *ending_node = NULL;
+
+    // Process the list of open nodes.
+    //   This continues until either the goal node is found or
+    //   the entire graph has been searched without finding it.
+    while (open_node_count > 0)
+    {
+        // TODO: optimize this list; binary heap or sorted open node list if needed
+        // Search the open node list for the node with the lowest F cost.
+        float min_cost = FLOAT_MAX;
+        struct WorkingPathNode *cheapest_node = NULL;
+        uint32 cheapest_node_index = UINT32_MAX;
+
+        //fprintf(stderr, "searching for cheapest node from %u nodes in open list\n", open_node_count);
+        for (uint32 i = 0; i < open_node_count; ++i)
+        {
+            struct WorkingPathNode *node = &open_nodes[i];
+            if (node->f_cost < min_cost)
             {
-                ASSERT(graph->edge_count < ARRAY_SIZE(graph->edges));
-                uint32 *edge = &graph->edges[graph->edge_count++][0];
-                edge[0] = i;
-                edge[1] = j;
+                min_cost = node->f_cost;
+                cheapest_node = node;
+                cheapest_node_index = i;
+            }
+        }
+
+        ASSERT_NOT_NULL(cheapest_node);
+        //fprintf(stderr, "cheapest node has %u neighbors\n", cheapest_node->node->neighbor_index_count);
+
+        // Add the resulting node to the closed list.
+        struct WorkingPathNode *current_node = &closed_nodes[closed_node_count++];
+        *current_node = *cheapest_node;
+
+        // Found the ending node! End the search.
+        if (current_node->node == ending_visibility_node)
+        {
+            ending_node = current_node;
+            break;
+        }
+
+        // Remove the resulting node from the open list.
+        if (cheapest_node_index == open_node_count - 1)
+        {
+            // Node is already the last element in the array.
+            --open_node_count;
+        }
+        else
+        {
+            // Swap the nearest node with the last node in the list.
+            struct WorkingPathNode *last_node = &open_nodes[open_node_count - 1];
+            open_nodes[cheapest_node_index] = *last_node;
+
+            --open_node_count;
+        }
+
+        // Consider the node's neighbors.
+        struct VisibilityNode *current_visibility_node = current_node->node;
+        //fprintf(stderr, "considering %u neighbors: %u, %u\n", current_visibility_node->neighbor_index_count, open_node_count, closed_node_count);
+        for (uint32 i = 0; i < current_visibility_node->neighbor_index_count; ++i)
+        {
+            uint32 neighbor_index = current_visibility_node->neighbor_indices[i];
+            struct VisibilityNode *neighbor = &graph->nodes[neighbor_index];
+            ASSERT_NOT_NULL(neighbor);
+
+            // Out parameter of is_node_in_list().
+            struct WorkingPathNode *match = NULL;
+
+            // Ignore the node if it's already in the closed list.
+            if (is_node_in_list(closed_nodes, closed_node_count, neighbor, &match))
+            {
+                //fprintf(stderr, "in closed list, ignoring: %u, %u\n", open_node_count, closed_node_count);
+                continue;
+            }
+
+            // Check if the node is already in the open list.
+            if (!is_node_in_list(open_nodes, open_node_count, neighbor, &match))
+            {
+                //fprintf(stderr, "not in open list, adding: %u, %u\n", open_node_count, closed_node_count);
+
+                // Not in the open list, so add it and calculate its F=G+H cost.
+                struct WorkingPathNode *new_node = &open_nodes[open_node_count++];
+                new_node->node = neighbor;
+                new_node->parent = current_node;
+
+                vec2 new_node_position = graph->vertices[new_node->node->vertex_index];
+
+                // F = G + H
+                new_node->g_cost = calc_g_cost(start, new_node_position);
+                new_node->h_cost = calc_h_cost(start, new_node_position);
+                new_node->f_cost = new_node->g_cost + new_node->h_cost;
+            }
+            else
+            {
+                // Already in the open list, so check if this path's G cost is
+                // better than the one calculated when it was originally added.
+                ASSERT_NOT_NULL(match);
+
+                //fprintf(stderr, "already in open list, reconsidering: %u, %u\n", open_node_count, closed_node_count);
+
+                vec2 node_position = graph->vertices[match->node->vertex_index];
+                float candidate_g_cost = calc_g_cost(start, node_position);
+
+                if (candidate_g_cost < match->g_cost)
+                {
+                    // Better path found, so adjust the parent and F/G costs.
+                    match->parent = current_node;
+                    match->g_cost = candidate_g_cost;
+                    match->f_cost = match->g_cost + match->h_cost;
+                }
             }
         }
     }
-#endif
 
-    fprintf(stderr, "generated visibility graph containing %u verts, %u nodes\n", graph->vertex_count, graph->node_count);
+    ASSERT_NOT_NULL(ending_node);
+
+    // Construct the final path.
+    struct Path path = {0};
+    path.start = start;
+    path.end = end;
+
+    // Move backward through the path nodes, adding each one to the final path list.
+    while (ending_node->parent != NULL)
+    {
+        path.nodes[path.node_count++] = ending_node->node;
+        ending_node = ending_node->parent;
+    }
+
+    // Reverse the path list.
+    if (path.node_count > 1)
+    {
+        uint32 i = 0;
+        uint32 j = path.node_count - 1;
+        while (i < j)
+        {
+            struct VisibilityNode *temp = path.nodes[i];
+            path.nodes[i] = path.nodes[j];
+            path.nodes[j] = temp;
+
+            ++i;
+            --j;
+        }
+    }
+
+    return path;
 }
 
 void init_game(struct GameMemory *memory)
@@ -543,7 +756,7 @@ void init_game(struct GameMemory *memory)
     for (uint32 i = 0; i < 4; ++i)
     {
         struct Building *building = create_building(game_state);
-        building->position = vec2_new(random_int(-16, 16), random_int(-16, 16));
+        building->position = vec2_new(random_int(-32, 32), random_int(-32, 32));
         building->size = vec2_new(2, 2);
     }
 
@@ -766,36 +979,7 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
 
     clear_render_buffer(render_buffer);
 
-    for (uint32 i = 0; i < game_state->visibility_graph.vertex_count; ++i)
-    {
-        vec2 vertex = game_state->visibility_graph.vertices[i];
-        draw_world_quad_buffered(render_buffer, vertex, vec2_scalar(0.1f), vec4_zero(), vec3_new(0, 1, 1));
-    }
-
-    for (uint32 i = 0; i < game_state->visibility_graph.node_count; ++i)
-    {
-        struct VisibilityNode *node = &game_state->visibility_graph.nodes[i];
-        for (uint32 j = 0; j < node->edge_count; ++j)
-        {
-            vec2 p0 = game_state->visibility_graph.vertices[node->index];
-            vec2 p1 = game_state->visibility_graph.vertices[node->edges[j]];
-
-            draw_world_line_buffered(render_buffer, p0, p1, vec3_new(1, 1, 0));
-        }
-    }
-
-#if 0
-    for (uint32 i = 0; i < game_state->visibility_graph.edge_count; ++i)
-    {
-        uint32 *edge = &game_state->visibility_graph.edges[i][0];
-
-        vec2 p0 = game_state->visibility_graph.vertices[edge[0]];
-        vec2 p1 = game_state->visibility_graph.vertices[edge[1]];
-
-        draw_world_line_buffered(render_buffer, p0, p1, vec3_new(1, 1, 0));
-    }
-#endif
-
+    // Draw mouse selection box.
     if (mouse_down(MOUSE_LEFT, input))
     {
         struct AABB box = calc_mouse_selection_box(input, MOUSE_LEFT);
@@ -814,6 +998,7 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
         draw_screen_quad_buffered(render_buffer, top_right, vec2_new(outline_thickness, size.y), vec4_zero(), vec3_new(1, 1, 0));
     }
 
+    // Select entities.
     if (mouse_released(MOUSE_LEFT, input))
     {
         // Clear previous selection.
@@ -848,19 +1033,104 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
             fprintf(stderr, "selected %u ships\n", game_state->selected_ship_count);
     }
 
+    // Issue move orders.
     if (mouse_down(MOUSE_RIGHT, input))
     {
-        vec2 target_position = screen_to_world_coords(input->mouse_position, &game_state->camera, screen_width, screen_height);
+        vec2 end = screen_to_world_coords(input->mouse_position, &game_state->camera, screen_width, screen_height);
 
         for (uint32 i = 0; i < game_state->selected_ship_count; ++i)
         {
             uint32 id = game_state->selected_ships[i];
             struct Ship *ship = get_ship_by_id(game_state, id);
 
-            ship->target_position = target_position;
-            ship->move_order = true;
+            vec2 start = ship->position;
+
+            ship->path = find_path(&game_state->visibility_graph, start, end);
+            ship->flags |= UNIT_MOVE_ORDER;
         }
     }
+
+    // Handle move orders.
+    for (uint32 i = 0; i < game_state->ship_count; ++i)
+    {
+        struct Ship *ship = &game_state->ships[i];
+        if (ship->flags & UNIT_MOVE_ORDER)
+        {
+            // Ship has reached the final node and is pathing to the exact target coordinates.
+            if ((ship->path.node_count == 0) || (ship->path.current_node_index == ship->path.node_count - 1))
+            {
+                if (vec2_distance2(ship->position, ship->path.end) < 0.1f)
+                {
+                    // Final destination reached.
+                    ship->flags &= ~UNIT_MOVE_ORDER;
+                    ship->move_velocity = vec2_zero();
+                }
+                else
+                {
+                    vec2 direction = vec2_normalize(vec2_sub(ship->path.end, ship->position));
+                    ship->move_velocity = vec2_mul(direction, 2.0f);
+                }
+
+                continue;
+            }
+
+            // Move toward the current node in the stored path.
+            struct VisibilityNode *target_node = ship->path.nodes[ship->path.current_node_index];
+            ASSERT_NOT_NULL(target_node);
+            vec2 target_node_position = game_state->visibility_graph.vertices[target_node->vertex_index];
+
+            // Current node has been reached, so move to the next node.
+            if (vec2_distance2(ship->position, target_node_position) < 0.1f)
+            {
+                ++ship->path.current_node_index;
+
+                // Ship has reached the final node.
+                if (ship->path.current_node_index == ship->path.node_count - 1)
+                    continue;
+
+                // Update the target.
+                target_node = ship->path.nodes[ship->path.current_node_index];
+                target_node_position = game_state->visibility_graph.vertices[target_node->vertex_index];
+            }
+
+            vec2 direction = vec2_normalize(vec2_sub(target_node_position, ship->position));
+            ship->move_velocity = vec2_mul(direction, 2.0f);
+        }
+    }
+
+    tick_camera(input, &game_state->camera, dt);
+
+    tick_combat(game_state, dt);
+    tick_physics(game_state, dt);
+
+#if 0
+    // Draw visibility graph vertices.
+    for (uint32 i = 0; i < game_state->visibility_graph.vertex_count; ++i)
+    {
+        vec2 vertex = game_state->visibility_graph.vertices[i];
+        draw_world_quad_buffered(render_buffer, vertex, vec2_scalar(0.1f), vec4_zero(), vec3_new(0, 1, 1));
+    }
+#endif
+
+#if 0
+    static uint32 index = 0;
+    if (key_down_new(KEY_F, input))
+        ++index;
+#endif
+#if 0
+    // Draw visibility graph edges.
+    for (uint32 i = 0; i < game_state->visibility_graph.node_count; ++i)
+    {
+        struct VisibilityNode *node = &game_state->visibility_graph.nodes[i];
+        for (uint32 j = 0; j < node->neighbor_index_count; ++j)
+        {
+            vec2 p0 = game_state->visibility_graph.vertices[node->vertex_index];
+            vec2 p1 = game_state->visibility_graph.vertices[node->neighbor_indices[j]];
+
+            draw_world_line_buffered(render_buffer, p0, p1, vec3_new(1, 1, 0));
+        }
+    }
+#endif
 
     // Outline selected ships.
     for (uint32 i = 0; i < game_state->selected_ship_count; ++i)
@@ -870,40 +1140,45 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
 
         draw_world_quad_buffered(render_buffer, ship->position, vec2_mul(ship->size, 1.1f), vec4_zero(), vec3_new(0, 1, 0));
 
-        if (ship->move_order)
-            draw_world_quad_buffered(render_buffer, ship->target_position, vec2_new(0.5f, 0.5f), vec4_zero(), vec3_new(0, 1, 0));
-    }
-
-    // Handle move orders.
-    for (uint32 i = 0; i < game_state->ship_count; ++i)
-    {
-        struct Ship *ship = &game_state->ships[i];
-        if (ship->move_order)
+        // Draw path.
+        if (ship->flags & UNIT_MOVE_ORDER)
         {
-            vec2 direction = vec2_zero();
-            /*
-            if (vec2_length2(direction) < FLOAT_EPSILON)
-                direction = vec2_normalize(vec2_sub(ship->target_position, ship->position));
-                */
-            ship->move_velocity = vec2_mul(direction, 2.0f);
+            draw_world_quad_buffered(render_buffer, ship->path.start, vec2_scalar(0.5f), vec4_zero(), vec3_new(0, 0, 1));
+            draw_world_quad_buffered(render_buffer, ship->path.end, vec2_scalar(0.5f), vec4_zero(), vec3_new(0, 1, 1));
 
-            /*
-            vec2 direction = vec2_normalize(vec2_sub(ship->target_position, ship->position));
-            ship->move_velocity = vec2_mul(direction, 2.0f);
-            */
-
-            if (vec2_distance2(ship->position, ship->target_position) < 0.1f)
+            for (uint32 j = 0; j < ship->path.node_count; ++j)
             {
-                ship->move_velocity = vec2_zero();
-                ship->move_order = false;
+                vec2 node_position = game_state->visibility_graph.vertices[ship->path.nodes[j]->vertex_index];
+                vec3 color = (j == ship->path.current_node_index) ? vec3_new(0, 1, 0) : vec3_new(1, 0, 0);
+                draw_world_quad_buffered(render_buffer, node_position, vec2_scalar(0.5f), vec4_zero(), color);
+            }
+
+            if (ship->path.node_count == 0)
+            {
+                draw_world_line_buffered(render_buffer, ship->path.start, ship->path.end, vec3_new(1, 1, 0));
+            }
+            else
+            {
+                vec2 first_node_position = game_state->visibility_graph.vertices[ship->path.nodes[0]->vertex_index];
+                draw_world_line_buffered(render_buffer, ship->path.start, first_node_position, vec3_new(1, 1, 0));
+
+                if (ship->path.node_count == 1)
+                {
+                    vec2 last_node_position = game_state->visibility_graph.vertices[ship->path.nodes[0]->vertex_index];
+                    draw_world_line_buffered(render_buffer, last_node_position, ship->path.end, vec3_new(1, 1, 0));
+                }
+                else
+                {
+                    for (uint32 j = 0; j < ship->path.node_count - 1; ++j)
+                    {
+                        vec2 p0 = game_state->visibility_graph.vertices[ship->path.nodes[j]->vertex_index];
+                        vec2 p1 = game_state->visibility_graph.vertices[ship->path.nodes[j + 1]->vertex_index];
+                        draw_world_line_buffered(render_buffer, p0, p1, vec3_new(1, 1, 0));
+                    }
+                }
             }
         }
     }
-
-    tick_camera(input, &game_state->camera, dt);
-
-    tick_combat(game_state, dt);
-    tick_physics(game_state, dt);
 }
 
 static void draw_buildings(struct GameState *game_state, struct Renderer *renderer)
