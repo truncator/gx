@@ -408,7 +408,7 @@ static bool is_visible(struct GameState *game_state, vec2 start, vec2 end, float
 static void calc_visibility_graph(struct GameState *game_state, struct VisibilityGraph *graph)
 {
     graph->vertex_count = 0;
-    graph->edge_count = 0;
+    graph->node_count = 0;
 
     const uint32 resolution = 4;
     const float world_size = 64.0f;
@@ -447,6 +447,31 @@ static void calc_visibility_graph(struct GameState *game_state, struct Visibilit
 
     for (uint32 i = 0; i < graph->vertex_count - 1; ++i)
     {
+        struct VisibilityNode *n0 = &graph->nodes[graph->node_count++];
+        n0->index = i;
+
+        for (uint32 j = i + 1; j < graph->vertex_count; ++j)
+        {
+            ASSERT(i < ARRAY_SIZE(graph->vertices));
+            ASSERT(j < ARRAY_SIZE(graph->vertices));
+
+            vec2 v0 = graph->vertices[i];
+            vec2 v1 = graph->vertices[j];
+
+            if (is_visible(game_state, v0, v1, edge_padding))
+            {
+                struct VisibilityNode *n1 = &graph->nodes[graph->node_count++];
+                n1->index = j;
+
+                n0->edges[n0->edge_count++] = n1->index;
+                n1->edges[n1->edge_count++] = n0->index;
+            }
+        }
+    }
+
+#if 0
+    for (uint32 i = 0; i < graph->vertex_count - 1; ++i)
+    {
         for (uint32 j = i + 1; j < graph->vertex_count; ++j)
         {
             ASSERT(i < ARRAY_SIZE(graph->vertices));
@@ -464,8 +489,9 @@ static void calc_visibility_graph(struct GameState *game_state, struct Visibilit
             }
         }
     }
+#endif
 
-    fprintf(stderr, "generated visibility graph containing %u verts, %u edges\n", graph->vertex_count, graph->edge_count);
+    fprintf(stderr, "generated visibility graph containing %u verts, %u nodes\n", graph->vertex_count, graph->node_count);
 }
 
 void init_game(struct GameMemory *memory)
@@ -746,6 +772,19 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
         draw_world_quad_buffered(render_buffer, vertex, vec2_scalar(0.1f), vec4_zero(), vec3_new(0, 1, 1));
     }
 
+    for (uint32 i = 0; i < game_state->visibility_graph.node_count; ++i)
+    {
+        struct VisibilityNode *node = &game_state->visibility_graph.nodes[i];
+        for (uint32 j = 0; j < node->edge_count; ++j)
+        {
+            vec2 p0 = game_state->visibility_graph.vertices[node->index];
+            vec2 p1 = game_state->visibility_graph.vertices[node->edges[j]];
+
+            draw_world_line_buffered(render_buffer, p0, p1, vec3_new(1, 1, 0));
+        }
+    }
+
+#if 0
     for (uint32 i = 0; i < game_state->visibility_graph.edge_count; ++i)
     {
         uint32 *edge = &game_state->visibility_graph.edges[i][0];
@@ -755,6 +794,7 @@ void tick_game(struct GameMemory *memory, struct Input *input, uint32 screen_wid
 
         draw_world_line_buffered(render_buffer, p0, p1, vec3_new(1, 1, 0));
     }
+#endif
 
     if (mouse_down(MOUSE_LEFT, input))
     {

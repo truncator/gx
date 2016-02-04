@@ -81,13 +81,22 @@ struct Projectile
     vec2 velocity;
 };
 
+struct VisibilityNode
+{
+    uint32 index;
+
+    // TODO: linked list if memory becomes an issue?
+    uint32 edges[32];
+    uint32 edge_count;
+};
+
 struct VisibilityGraph
 {
     vec2 vertices[4096];
     uint32 vertex_count;
 
-    uint32 edges[4096][2];
-    uint32 edge_count;
+    struct VisibilityNode nodes[4096];
+    uint32 node_count;
 };
 
 struct Building

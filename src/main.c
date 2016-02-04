@@ -101,7 +101,7 @@ int main(int argc, char *argv[])
     struct Renderer renderer = init_renderer();
 
     struct GameMemory game_memory = {0};
-    game_memory.game_memory_size = MEGABYTES(2);
+    game_memory.game_memory_size = MEGABYTES(1);
     game_memory.render_memory_size = MEGABYTES(1);
     game_memory.game_memory = calloc(1, game_memory.game_memory_size);
     game_memory.render_memory = calloc(1, game_memory.render_memory_size);
